@@ -167,6 +167,35 @@ body.dark {
   padding: 16px 16px 8px;
 }
 
+.op-card {
+  background: var(--card);
+  border-radius: 16px;
+  padding: 16px;
+  margin: 8px 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  box-shadow: 0 1px 3px rgba(8, 61, 54, 0.04);
+}
+
+.op-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1.5px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+}
+
+.op-chip-active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
+}
+
 @keyframes fadeUp {
   from {
     opacity: 0;

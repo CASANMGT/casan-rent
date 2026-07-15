@@ -6,55 +6,103 @@ import {
   formatIdrShort,
   haversineKm,
   modeLabel,
+  batteryPctLabel,
+  osmBrowseUrl,
   USER_LAT,
   USER_LNG,
   vehicleTypeLabel,
 } from "@/lib/format";
 import { useAppStore } from "@/lib/store";
 import { BottomNav } from "@/components/BottomNav";
+import { AuthGate } from "@/components/AuthGate";
 import { useMemo, useState } from "react";
 import type { VehicleType } from "@/lib/types";
-import { Bell } from "lucide-react";
+import { Bell, Search, User } from "lucide-react";
+import {
+  listAllModels,
+  modelBatteryLabel,
+  operatorRatingStats,
+} from "@/lib/catalog";
+import { MockMap } from "@/components/MockMap";
 
 type Tab = "map" | "operators" | "vehicles" | "saved";
 
 export default function RiderHomePage() {
+  return (
+    <AuthGate role="rider">
+      <HomeInner />
+    </AuthGate>
+  );
+}
+
+function HomeInner() {
   const operators = useAppStore((s) => s.operators);
+  const models = useAppStore((s) => s.models);
   const vehicles = useAppStore((s) => s.vehicles);
   const bookings = useAppStore((s) => s.bookings);
   const favorites = useAppStore((s) => s.favorites);
   const notifications = useAppStore((s) => s.notifications);
-  const [tab, setTab] = useState<Tab>("map");
+  const reviews = useAppStore((s) => s.reviews);
+  const [tab, setTab] = useState<Tab>("vehicles");
   const [typeFilter, setTypeFilter] = useState<VehicleType | "all">("all");
   const [query, setQuery] = useState("");
 
-  const active = bookings.find((b) => b.status === "active");
+  const active = bookings.find(
+    (b) => b.status === "active" || b.status === "overdue",
+  );
+  const activeVehicle = vehicles.find((v) => v.id === active?.vehicleId);
   const unread = notifications.filter((n) => !n.read).length;
 
-  const available = useMemo(() => {
-    return vehicles.filter((v) => {
-      if (v.status !== "available") return false;
-      if (typeFilter !== "all" && v.vehicleType !== typeFilter) return false;
-      const op = operators.find((o) => o.id === v.operatorId);
-      const hay = `${v.name} ${op?.name ?? ""} ${v.code}`.toLowerCase();
-      return hay.includes(query.toLowerCase());
-    });
-  }, [vehicles, operators, typeFilter, query]);
+  const opNames = useMemo(
+    () => Object.fromEntries(operators.map((o) => [o.id, o.name])),
+    [operators],
+  );
+
+  const modelListings = useMemo(() => {
+    return listAllModels(
+      models,
+      vehicles,
+      typeFilter,
+      query,
+      opNames,
+    )
+      .filter((m) => m.availableCount > 0)
+      .sort((a, b) => {
+        const aJ =
+          operators.find((o) => o.id === a.model.operatorId)?.city === "Jakarta"
+            ? 0
+            : 1;
+        const bJ =
+          operators.find((o) => o.id === b.model.operatorId)?.city === "Jakarta"
+            ? 0
+            : 1;
+        if (aJ !== bJ) return aJ - bJ;
+        return b.availableCount - a.availableCount;
+      });
+  }, [models, vehicles, typeFilter, query, opNames, operators]);
 
   const opsFiltered = useMemo(() => {
     return operators
       .filter((o) =>
         `${o.name} ${o.address}`.toLowerCase().includes(query.toLowerCase()),
       )
-      .map((o) => ({
-        ...o,
-        dist: haversineKm(USER_LAT, USER_LNG, o.lat, o.lng),
-        count: vehicles.filter(
-          (v) => v.operatorId === o.id && v.status === "available",
-        ).length,
-      }))
-      .sort((a, b) => a.dist - b.dist);
-  }, [operators, vehicles, query]);
+      .map((o) => {
+        const rating = operatorRatingStats(o.id, bookings, reviews);
+        return {
+          ...o,
+          dist: haversineKm(USER_LAT, USER_LNG, o.lat, o.lng),
+          count: vehicles.filter(
+            (v) => v.operatorId === o.id && v.status === "available",
+          ).length,
+          rating,
+        };
+      })
+      .sort((a, b) => {
+        if (a.city === "Jakarta" && b.city !== "Jakarta") return -1;
+        if (b.city === "Jakarta" && a.city !== "Jakarta") return 1;
+        return a.dist - b.dist;
+      });
+  }, [operators, vehicles, query, bookings, reviews]);
 
   return (
     <div className="content-pad">
@@ -64,14 +112,21 @@ export default function RiderHomePage() {
           className="flex items-center gap-3 px-4 py-3.5 text-white"
           style={{
             background:
-              "linear-gradient(135deg, var(--primary), var(--primary-light))",
+              active.status === "overdue"
+                ? "linear-gradient(135deg, #c0392b, #e74c3c)"
+                : "linear-gradient(135deg, var(--primary), var(--primary-light))",
           }}
         >
-          <span className="text-2xl">🚲</span>
+          <span className="text-2xl">{activeVehicle?.emoji ?? "🚲"}</span>
           <div className="flex-1">
-            <div className="text-xs text-white/85">Active rental</div>
-            <div className="text-lg font-bold tabular-nums">
-              Tap to open ride
+            <div className="text-xs text-white/85">
+              {active.status === "overdue" ? "Overdue — return now" : "Active rental"}
+            </div>
+            <div className="text-base font-bold">
+              {activeVehicle?.name ?? "Open ride"} · {activeVehicle?.code}
+            </div>
+            <div className="text-[11px] text-white/80">
+              {active.durationLabel} · tap to control
             </div>
           </div>
           <span className="text-2xl opacity-70">›</span>
@@ -88,7 +143,9 @@ export default function RiderHomePage() {
         <div className="flex items-start justify-between">
           <div>
             <h1 className="font-display text-2xl font-semibold">Casan Rent</h1>
-            <p className="text-xs text-white/85">Multi-operator mobility</p>
+            <p className="text-xs text-white/85">
+              Kost & campus e-bikes · Jakarta first
+            </p>
           </div>
           <div className="flex gap-2">
             <Link
@@ -107,9 +164,9 @@ export default function RiderHomePage() {
             </Link>
             <Link
               href="/profile"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-sm"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20"
             >
-              👤
+              <User size={18} />
             </Link>
           </div>
         </div>
@@ -119,10 +176,10 @@ export default function RiderHomePage() {
         className="mx-4 mt-3 flex items-center gap-2 rounded-xl px-3 py-3 shadow-sm"
         style={{ background: "var(--card)" }}
       >
-        <span style={{ color: "var(--text2)" }}>⌕</span>
+        <Search size={18} style={{ color: "var(--text2)" }} />
         <input
           className="w-full border-none bg-transparent text-[15px] outline-none"
-          placeholder="Search location, hotel, vehicle…"
+          placeholder="Search kost hub, model, operator…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -132,18 +189,25 @@ export default function RiderHomePage() {
         className="mx-4 mt-3 flex gap-1 rounded-xl p-1"
         style={{ background: "var(--card)" }}
       >
-        {(["map", "operators", "vehicles", "saved"] as Tab[]).map((t) => (
+        {(
+          [
+            ["map", "Map"],
+            ["operators", "Hubs"],
+            ["vehicles", "Bikes"],
+            ["saved", "Saved"],
+          ] as [Tab, string][]
+        ).map(([t, label]) => (
           <button
             key={t}
             type="button"
-            className="flex-1 rounded-lg py-2.5 text-xs font-semibold capitalize"
+            className="flex-1 rounded-lg py-2.5 text-xs font-semibold"
             style={{
               background: tab === t ? "var(--primary)" : "transparent",
               color: tab === t ? "white" : "var(--text2)",
             }}
             onClick={() => setTab(t)}
           >
-            {t}
+            {label}
           </button>
         ))}
       </div>
@@ -178,56 +242,47 @@ export default function RiderHomePage() {
 
       {tab === "map" ? (
         <div className="anim-fade-up">
-          <div
-            className="relative mx-4 mt-3 h-52 overflow-hidden rounded-2xl"
-            style={{
-              background:
-                "linear-gradient(145deg, #b8d4ce 0%, #9bc4bb 40%, #d4e8e2 100%)",
-            }}
-          >
-            {opsFiltered.map((op, i) => (
-              <Link
-                key={op.id}
-                href={`/operators/${op.id}`}
-                className="absolute flex h-9 w-9 items-center justify-center rounded-full text-lg shadow"
-                style={{
+          <div className="relative mx-4 mt-3">
+            <MockMap
+              height={208}
+              mapImage={
+                opsFiltered.find((o) => o.city === "Jakarta")?.mapImage ??
+                "/maps/margonda.svg"
+              }
+              label="OpenStreetMap · Jakarta kost"
+              userPin={{ top: "62%", left: "48%" }}
+              pins={opsFiltered
+                .filter((o) => o.city === "Jakarta")
+                .slice(0, 3)
+                .map((op, i) => ({
+                  id: op.id,
+                  label: op.name,
                   top: `${28 + i * 18}%`,
                   left: `${20 + i * 22}%`,
-                  background: "var(--primary)",
-                  color: "white",
-                }}
-                title={op.name}
-              >
-                📍
-              </Link>
-            ))}
-            <div
-              className="absolute h-4 w-4 rounded-full border-[3px] border-white"
-              style={{
-                top: "62%",
-                left: "48%",
-                background: "var(--digital)",
-                boxShadow: "0 0 0 4px rgba(40,116,166,0.25)",
-              }}
+                  href: `/operators/${op.id}`,
+                }))}
             />
             <a
-              href={`https://www.google.com/maps/dir/?api=1&destination=${opsFiltered[0]?.lat},${opsFiltered[0]?.lng}`}
+              href={osmBrowseUrl(
+                opsFiltered[0]?.lat ?? USER_LAT,
+                opsFiltered[0]?.lng ?? USER_LNG,
+              )}
               target="_blank"
               rel="noreferrer"
-              className="absolute bottom-3 right-3 rounded-full bg-white px-3 py-2 text-xs font-semibold shadow"
+              className="absolute bottom-3 right-3 z-20 rounded-full bg-white px-3 py-2 text-xs font-semibold shadow"
             >
-              Directions
+              Open OSM
             </a>
           </div>
-          <p className="section-label">Nearby operators</p>
-          {opsFiltered.slice(0, 3).map((op) => (
+          <p className="section-label">Nearby operators (Jakarta first)</p>
+          {opsFiltered.slice(0, 5).map((op) => (
             <OperatorRow
               key={op.id}
               id={op.id}
               emoji={op.emoji}
               name={op.name}
-              address={op.address}
-              meta={`${op.count} available · ${op.supportsFrontDesk ? "Desk" : ""}${op.supportsFrontDesk && op.supportsSelfService ? " + " : ""}${op.supportsSelfService ? "Self-service" : ""}`}
+              address={`${op.city} · ${op.address}`}
+              meta={`${op.count} units · ${op.rating.count ? `★ ${op.rating.avg} · ${op.rating.count} reviews` : "New"} · ${op.supportsFrontDesk ? "Shop" : ""}${op.supportsFrontDesk && op.supportsSelfService ? " + " : ""}${op.supportsSelfService ? "Self-collect" : ""}`}
               distance={formatDistance(op.dist)}
             />
           ))}
@@ -243,48 +298,68 @@ export default function RiderHomePage() {
               emoji={op.emoji}
               name={op.name}
               address={op.address}
-              meta={`${op.count} vehicles available`}
+              meta={`${op.count} units available${op.rating.count ? ` · ★ ${op.rating.avg}` : ""}`}
               distance={formatDistance(op.dist)}
             />
           ))}
         </div>
       ) : null}
 
-      {tab === "vehicles" || tab === "map" ? null : null}
       {tab === "vehicles" ? (
         <div className="anim-fade-up mt-2">
-          {available.map((v) => {
-            const op = operators.find((o) => o.id === v.operatorId);
+          {modelListings.length === 0 ? (
+            <p className="px-6 py-10 text-center text-sm" style={{ color: "var(--text2)" }}>
+              No models match. Try another type or clear search.
+            </p>
+          ) : null}
+          {modelListings.map(({ model, availableCount, bestBattery }) => {
+            const op = operators.find((o) => o.id === model.operatorId);
             const dist = op
-              ? formatDistance(haversineKm(USER_LAT, USER_LNG, v.lat, v.lng))
+              ? formatDistance(haversineKm(USER_LAT, USER_LNG, op.lat, op.lng))
               : "";
             return (
               <Link
-                key={v.id}
-                href={`/vehicles/${v.id}`}
+                key={model.id}
+                href={`/models/${model.id}`}
                 className="mx-4 mb-2.5 flex gap-3 rounded-2xl p-3.5 shadow-sm"
                 style={{ background: "var(--card)" }}
               >
-                <div
-                  className="flex h-[90px] w-[90px] shrink-0 items-center justify-center rounded-xl text-4xl"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, var(--primary-light), var(--primary))",
-                  }}
-                >
-                  {v.emoji}
-                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={model.images[0]}
+                  alt=""
+                  className="h-[90px] w-[90px] shrink-0 rounded-xl object-cover"
+                />
                 <div className="flex flex-1 flex-col justify-between">
                   <div>
-                    <div className="font-bold">{v.name}</div>
+                    <div className="font-bold">{model.name}</div>
                     <div className="text-xs" style={{ color: "var(--text2)" }}>
-                      {op?.name} · {dist} · {vehicleTypeLabel(v.vehicleType)} ·{" "}
-                      {modeLabel(v.rentalMode)}
+                      {op?.city} · {op?.name} · {dist}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        style={{ background: "var(--bg-deep)", color: "var(--primary)" }}
+                      >
+                        {modelBatteryLabel(model)}
+                      </span>
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        style={{ background: "#E8F8F5", color: "var(--ok)" }}
+                      >
+                        {batteryPctLabel(bestBattery, model.vehicleType)}
+                      </span>
+                      <span
+                        className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        style={{ background: "#FEF5E7", color: "#9A5B00" }}
+                      >
+                        {modeLabel(model.rentalMode)}
+                      </span>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="mt-1.5 flex items-center justify-between">
                     <div className="font-bold" style={{ color: "var(--primary)" }}>
-                      {formatIdrShort(v.pricePerHour)}
+                      from {formatIdrShort(model.pricePerHour)}
                       <span className="text-xs font-normal" style={{ color: "var(--text2)" }}>
                         /hr
                       </span>
@@ -293,7 +368,7 @@ export default function RiderHomePage() {
                       className="rounded-full px-2.5 py-1 text-xs font-semibold"
                       style={{ background: "#E8F8F5", color: "var(--ok)" }}
                     >
-                      Available
+                      {availableCount} left
                     </span>
                   </div>
                 </div>
@@ -305,22 +380,42 @@ export default function RiderHomePage() {
 
       {tab === "saved" ? (
         <div className="anim-fade-up mt-2">
+          {favorites.length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <p className="text-sm" style={{ color: "var(--text2)" }}>
+                Nothing saved yet. Star a model or operator to find it here.
+              </p>
+              <button
+                type="button"
+                className="mt-3 text-sm font-bold"
+                style={{ color: "var(--primary)" }}
+                onClick={() => setTab("vehicles")}
+              >
+                Browse nearby bikes →
+              </button>
+            </div>
+          ) : null}
           {favorites.map((id) => {
-            const v = vehicles.find((x) => x.id === id);
+            const model = models.find((x) => x.id === id);
             const op = operators.find((x) => x.id === id);
-            if (v) {
+            if (model) {
               return (
                 <Link
                   key={id}
-                  href={`/vehicles/${v.id}`}
+                  href={`/models/${model.id}`}
                   className="mx-4 mb-2.5 flex gap-3 rounded-2xl p-3.5"
                   style={{ background: "var(--card)" }}
                 >
-                  <div className="text-4xl">{v.emoji}</div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={model.images[0]}
+                    alt=""
+                    className="h-14 w-16 rounded-lg object-cover"
+                  />
                   <div>
-                    <div className="font-bold">{v.name}</div>
+                    <div className="font-bold">{model.name}</div>
                     <div className="text-xs" style={{ color: "var(--text2)" }}>
-                      Saved vehicle · {vehicleTypeLabel(v.vehicleType)}
+                      Saved model · {vehicleTypeLabel(model.vehicleType)}
                     </div>
                   </div>
                 </Link>
@@ -352,24 +447,29 @@ export default function RiderHomePage() {
       {tab === "map" ? (
         <div className="mt-2">
           <p className="section-label">Available nearby</p>
-          {available.slice(0, 3).map((v) => {
-            const op = operators.find((o) => o.id === v.operatorId);
+          {modelListings.slice(0, 3).map(({ model, availableCount }) => {
+            const op = operators.find((o) => o.id === model.operatorId);
             return (
               <Link
-                key={v.id}
-                href={`/vehicles/${v.id}`}
+                key={model.id}
+                href={`/models/${model.id}`}
                 className="mx-4 mb-2.5 flex gap-3 rounded-2xl p-3.5"
                 style={{ background: "var(--card)" }}
               >
-                <div className="text-3xl">{v.emoji}</div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={model.images[0]}
+                  alt=""
+                  className="h-12 w-14 rounded-lg object-cover"
+                />
                 <div className="flex-1">
-                  <div className="font-bold text-sm">{v.name}</div>
+                  <div className="font-bold text-sm">{model.name}</div>
                   <div className="text-xs" style={{ color: "var(--text2)" }}>
-                    {vehicleTypeLabel(v.vehicleType)} · {op?.name}
+                    {availableCount} left · {op?.name}
                   </div>
                 </div>
                 <div className="text-sm font-bold" style={{ color: "var(--primary)" }}>
-                  {formatIdrShort(v.pricePerHour)}
+                  {formatIdrShort(model.pricePerHour)}
                 </div>
               </Link>
             );

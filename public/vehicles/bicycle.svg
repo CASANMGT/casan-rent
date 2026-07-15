@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="560" viewBox="0 0 800 560">
+  <rect width="800" height="560" fill="#eef6f3"/>
+  <rect x="0" y="400" width="800" height="160" fill="#ddece6"/>
+  <circle cx="240" cy="400" r="68" fill="none" stroke="#222" stroke-width="16"/>
+  <circle cx="540" cy="400" r="68" fill="none" stroke="#222" stroke-width="16"/>
+  <path d="M240 400 L340 260 L500 260 L540 400 M340 260 L300 190 M420 260 L420 330" fill="none" stroke="#222" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M280 190 Q310 160 340 190" fill="none" stroke="#222" stroke-width="10"/>
+  <text x="400" y="520" text-anchor="middle" font-family="system-ui,sans-serif" font-size="28" fill="#0d6b5c" font-weight="600">Bicycle</text>
+</svg>

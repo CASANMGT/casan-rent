@@ -1,0 +1,10 @@
+﻿<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360' viewBox='0 0 600 360'>
+  <rect width='600' height='360' fill='#f2efe9'/>
+  <rect x='0' y='120' width='600' height='24' fill='#fff' stroke='#dad5c9'/>
+  <rect x='180' y='0' width='28' height='360' fill='#fff' stroke='#dad5c9'/>
+  <rect x='80' y='40' width='140' height='100' fill='#cde5c0' opacity='0.85'/>
+  <circle cx='220' cy='180' r='8' fill='#2c6e49'/><circle cx='220' cy='180' r='3' fill='#fff'/>
+  <rect x='12' y='12' width='190' height='28' rx='6' fill='#fff' opacity='0.92'/>
+  <text x='22' y='31' font-family='Arial,sans-serif' font-size='12' fill='#555'>OpenStreetMap · Ubud, Bali</text>
+  <text x='12' y='348' font-family='Arial,sans-serif' font-size='9' fill='#888'>© OpenStreetMap contributors (demo static)</text>
+</svg>

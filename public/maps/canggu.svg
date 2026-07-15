@@ -1,0 +1,10 @@
+﻿<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360' viewBox='0 0 600 360'>
+  <rect width='600' height='360' fill='#f2efe9'/>
+  <rect x='0' y='180' width='600' height='28' fill='#fff' stroke='#dad5c9'/>
+  <rect x='280' y='0' width='32' height='360' fill='#fff' stroke='#dad5c9'/>
+  <path d='M0 300 Q300 260 600 310' fill='none' stroke='#a8c4d8' stroke-width='24' opacity='0.5'/>
+  <circle cx='290' cy='170' r='8' fill='#2c6e49'/><circle cx='290' cy='170' r='3' fill='#fff'/>
+  <rect x='12' y='12' width='210' height='28' rx='6' fill='#fff' opacity='0.92'/>
+  <text x='22' y='31' font-family='Arial,sans-serif' font-size='12' fill='#555'>OpenStreetMap · Canggu, Bali</text>
+  <text x='12' y='348' font-family='Arial,sans-serif' font-size='9' fill='#888'>© OpenStreetMap contributors (demo static)</text>
+</svg>

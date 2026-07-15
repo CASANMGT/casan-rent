@@ -1,0 +1,9 @@
+﻿<svg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'>
+  <rect width='800' height='500' fill='#c5d4e0'/>
+  <rect y='320' width='800' height='180' fill='#9ca3af'/>
+  <rect x='50' y='200' width='200' height='160' fill='#e7e0d4'/>
+  <rect x='280' y='160' width='160' height='200' fill='#ddd4c4'/>
+  <rect x='480' y='180' width='240' height='180' fill='#e8dfd0'/>
+  <rect x='300' y='220' width='40' height='60' fill='#38bdf8'/>
+  <text x='40' y='460' font-family='Arial' font-size='22' fill='#1f2937' font-weight='bold'>Pickup lobby · Tebet kost center</text>
+</svg>

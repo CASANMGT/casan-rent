@@ -1,0 +1,12 @@
+﻿<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360' viewBox='0 0 600 360'>
+  <rect width='600' height='360' fill='#f2efe9'/>
+  <rect x='0' y='100' width='600' height='26' fill='#fff' stroke='#dad5c9'/>
+  <rect x='0' y='220' width='600' height='20' fill='#fff' stroke='#dad5c9'/>
+  <rect x='150' y='0' width='28' height='360' fill='#fff' stroke='#dad5c9'/>
+  <rect x='350' y='0' width='34' height='360' fill='#fff' stroke='#dad5c9'/>
+  <rect x='200' y='40' width='100' height='80' fill='#cde5c0' opacity='0.75'/>
+  <circle cx='360' cy='200' r='8' fill='#2c6e49'/><circle cx='360' cy='200' r='3' fill='#fff'/>
+  <rect x='12' y='12' width='210' height='28' rx='6' fill='#fff' opacity='0.92'/>
+  <text x='22' y='31' font-family='Arial,sans-serif' font-size='12' fill='#555'>OpenStreetMap · Rawamangun</text>
+  <text x='12' y='348' font-family='Arial,sans-serif' font-size='9' fill='#888'>© OpenStreetMap contributors (demo static)</text>
+</svg>

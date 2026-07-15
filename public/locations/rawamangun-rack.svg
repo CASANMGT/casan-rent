@@ -1,0 +1,9 @@
+﻿<svg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'>
+  <rect width='800' height='500' fill='#b8c9a8'/>
+  <rect y='340' width='800' height='160' fill='#78716c'/>
+  <ellipse cx='400' cy='300' rx='200' ry='40' fill='#57534e' opacity='0.3'/>
+  <rect x='250' y='220' width='80' height='120' fill='#16a34a'/>
+  <rect x='360' y='200' width='90' height='140' fill='#15803d'/>
+  <rect x='480' y='230' width='70' height='110' fill='#166534'/>
+  <text x='40' y='460' font-family='Arial' font-size='20' fill='#fff' font-weight='bold'>Self-collect rack · Rawamangun / UNJ</text>
+</svg>

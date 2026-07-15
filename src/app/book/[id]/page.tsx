@@ -23,13 +23,16 @@ export default function BookPaymentPage() {
   const vehicles = useAppStore((s) => s.vehicles);
   const operators = useAppStore((s) => s.operators);
   const payBooking = useAppStore((s) => s.payBooking);
+  const setPaymentMethod = useAppStore((s) => s.setPaymentMethod);
   const setToast = useAppStore((s) => s.setToast);
 
   const booking = bookings.find((b) => b.id === id);
   const vehicle = vehicles.find((v) => v.id === booking?.vehicleId);
   const op = operators.find((o) => o.id === booking?.operatorId);
 
-  const [method, setMethod] = useState<PaymentMethod>("qris");
+  const [method, setMethod] = useState<PaymentMethod>(
+    booking?.paymentMethod ?? "qris",
+  );
   const [loading, setLoading] = useState(false);
 
   if (!booking || !vehicle || !op) {
@@ -41,7 +44,7 @@ export default function BookPaymentPage() {
     );
   }
 
-  const total = booking.rentalPriceIdr + booking.depositIdr;
+  const total = booking.rentalPriceIdr + (booking.addonsPriceIdr ?? 0) + booking.depositIdr;
 
   async function pay() {
     setLoading(true);
@@ -56,6 +59,7 @@ export default function BookPaymentPage() {
         }),
       });
       const data = await res.json();
+      setPaymentMethod(booking!.id, method);
       payBooking(booking!.id);
       setToast(data.message ?? "Payment succeeded (mock)");
       router.push(`/book/${booking!.id}/confirmed`);
@@ -68,7 +72,7 @@ export default function BookPaymentPage() {
 
   return (
     <div className="content-pad">
-      <Header title="Payment" subtitle="Demo checkout" backHref={`/vehicles/${vehicle.id}`} />
+      <Header title="Payment" subtitle="Demo checkout" backHref={`/models/${booking.modelId}`} />
       <div className="card">
         <div className="font-bold">{vehicle.name}</div>
         <div className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
@@ -84,6 +88,12 @@ export default function BookPaymentPage() {
           <span>Rental</span>
           <span>{formatIdr(booking.rentalPriceIdr)}</span>
         </div>
+        {(booking.addons ?? []).map((a) => (
+          <div key={a.id} className="flex justify-between py-1.5 text-sm">
+            <span>{a.label}</span>
+            <span>{formatIdr(a.priceIdr)}</span>
+          </div>
+        ))}
         <div className="flex justify-between py-2 text-sm">
           <span>Deposit</span>
           <span>{formatIdr(booking.depositIdr)}</span>
@@ -99,7 +109,10 @@ export default function BookPaymentPage() {
         <button
           key={m.id}
           type="button"
-          onClick={() => setMethod(m.id)}
+          onClick={() => {
+            setMethod(m.id);
+            setPaymentMethod(booking.id, m.id);
+          }}
           className="mx-4 mb-2 flex w-[calc(100%-32px)] items-center gap-3 rounded-xl border-2 p-3.5 text-left"
           style={{
             borderColor: method === m.id ? "var(--primary)" : "transparent",

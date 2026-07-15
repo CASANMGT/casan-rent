@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [phone, setPhone] = useState("+62 812-9876-5432");
   const [otpStep, setOtpStep] = useState(false);
   const [otp, setOtp] = useState("548271");
-  const [username, setUsername] = useState("balisunset.admin");
+  const [username, setUsername] = useState("margonda.admin");
   const [password, setPassword] = useState("casan2026");
 
   function continueGuest() {
@@ -181,7 +181,7 @@ export default function LoginPage() {
             Operator Login
           </button>
           <p className="px-6 text-center text-xs" style={{ color: "var(--text2)" }}>
-            Demo: balisunset.admin / casan2026
+            Demo: margonda.admin / casan2026
           </p>
         </div>
       )}

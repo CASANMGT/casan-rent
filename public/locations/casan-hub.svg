@@ -1,0 +1,10 @@
+﻿<svg xmlns='http://www.w3.org/2000/svg' width='800' height='500' viewBox='0 0 800 500'>
+  <rect width='800' height='500' fill='#1a3a4a'/>
+  <rect y='300' width='800' height='200' fill='#2d3748'/>
+  <rect x='100' y='180' width='280' height='160' rx='8' fill='#0d9488'/>
+  <rect x='120' y='200' width='240' height='80' fill='#134e4a'/>
+  <text x='160' y='248' font-family='Arial' font-size='28' fill='#5eead4' font-weight='bold'>CASAN</text>
+  <text x='150' y='280' font-family='Arial' font-size='14' fill='#99f6e4'>Charging hub · 48/60/72V</text>
+  <circle cx='550' cy='280' r='40' fill='#14b8a6' opacity='0.4'/>
+  <text x='40' y='460' font-family='Arial' font-size='20' fill='#fff'>Casan charging point · voucher redeem</text>
+</svg>

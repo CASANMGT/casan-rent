@@ -1,0 +1,15 @@
+﻿<svg xmlns='http://www.w3.org/2000/svg' width='600' height='360' viewBox='0 0 600 360'>
+  <rect width='600' height='360' fill='#f2efe9'/>
+  <rect x='0' y='60' width='600' height='32' fill='#fff' stroke='#dad5c9'/>
+  <rect x='0' y='180' width='600' height='24' fill='#fff' stroke='#dad5c9'/>
+  <rect x='0' y='280' width='600' height='18' fill='#fff' stroke='#dad5c9'/>
+  <rect x='90' y='0' width='30' height='360' fill='#fff' stroke='#dad5c9'/>
+  <rect x='260' y='0' width='42' height='360' fill='#fff' stroke='#dad5c9'/>
+  <rect x='450' y='0' width='22' height='360' fill='#fff' stroke='#dad5c9'/>
+  <rect x='300' y='100' width='80' height='60' fill='#cde5c0' opacity='0.8'/>
+  <rect x='50' y='200' width='70' height='50' fill='#cde5c0' opacity='0.6'/>
+  <circle cx='280' cy='170' r='8' fill='#2c6e49'/><circle cx='280' cy='170' r='3' fill='#fff'/>
+  <rect x='12' y='12' width='180' height='28' rx='6' fill='#fff' opacity='0.92'/>
+  <text x='22' y='31' font-family='Arial,sans-serif' font-size='12' fill='#555'>OpenStreetMap · Tebet</text>
+  <text x='12' y='348' font-family='Arial,sans-serif' font-size='9' fill='#888'>© OpenStreetMap contributors (demo static)</text>
+</svg>

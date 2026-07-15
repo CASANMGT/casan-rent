@@ -6,6 +6,8 @@ export type VehicleStatus =
   | "maintenance"
   | "charging";
 export type RentalMode = "digital" | "key_handover" | "both";
+/** What the rider gets for this booking. */
+export type KeysAccess = "digital" | "physical" | "both";
 export type PickupType = "front_desk" | "self_service";
 export type BookingStatus =
   | "pending"
@@ -29,6 +31,9 @@ export type StaffRole =
   | "fleet_attendant"
   | "viewer";
 
+export type BatteryVoltageV = 48 | 60 | 72;
+export type ChargingAddonKind = "casan_voucher" | "adapter";
+
 export interface Operator {
   id: string;
   slug: string;
@@ -42,13 +47,73 @@ export interface Operator {
   email: string;
   supportsFrontDesk: boolean;
   supportsSelfService: boolean;
+  /** Human label for shop / counter pickup */
+  shopPickupLabel: string;
+  /** Human label for unmanned / designated self-collect */
+  selfCollectLabel: string;
+  selfCollectLat: number;
+  selfCollectLng: number;
   platformFeePct: number;
   emoji: string;
+  coverImage: string;
+  /** Kost street / lobby / Casan hub photos */
+  locationImages: string[];
+  /** Bundled OSM static map screenshot */
+  mapImage: string;
 }
 
-export interface Vehicle {
+/** Physical station / pickup location for an operator (multi-site). */
+export interface OperatorSite {
   id: string;
   operatorId: string;
+  /** City — sites can be in different cities. */
+  city: string;
+  /** District / neighbourhood within the city (e.g. Tebet, Kemang). */
+  area: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  hours: string;
+  supportsFrontDesk: boolean;
+  supportsSelfService: boolean;
+  shopPickupLabel: string;
+  selfCollectLabel: string;
+}
+
+/** Catalog listing — riders book a model; a unit is auto-assigned. */
+export interface VehicleModel {
+  id: string;
+  operatorId: string;
+  name: string;
+  vehicleType: VehicleType;
+  description: string;
+  images: string[];
+  pricePerHour: number;
+  rentalMode: RentalMode;
+  allowFrontDesk: boolean;
+  allowSelfService: boolean;
+  motorWatts: number | null;
+  rangeKm: number | null;
+  maxSpeedKmh: number | null;
+  weightKg: number | null;
+  /** Pack voltage — null for pedal bikes (no battery). */
+  batteryVoltageV: BatteryVoltageV | null;
+  /** Battery capacity in ampere-hours — null if no pack. */
+  batteryAh: number | null;
+  /** Default included charger rating — null if no pack. */
+  chargerAmpsDefault: number | null;
+  requiresSimAck: boolean;
+  emoji: string;
+  includes: string[];
+}
+
+/** Physical fleet unit under a model. */
+export interface Vehicle {
+  id: string;
+  modelId: string;
+  operatorId: string;
+  siteId: string;
   code: string;
   name: string;
   vehicleType: VehicleType;
@@ -61,6 +126,9 @@ export interface Vehicle {
   rangeKm: number | null;
   maxSpeedKmh: number | null;
   weightKg: number | null;
+  batteryVoltageV: BatteryVoltageV | null;
+  batteryAh: number | null;
+  chargerAmpsDefault: number | null;
   pricePerHour: number;
   lat: number;
   lng: number;
@@ -85,24 +153,71 @@ export interface StaffMember {
   locationLabel: string;
 }
 
+/** Selectable charging product at book time. */
+export interface ChargingAddon {
+  id: string;
+  kind: ChargingAddonKind;
+  label: string;
+  description: string;
+  priceIdr: number;
+  voucherSlots?: number;
+  amps?: number;
+  /** Adapter voltage match; null = voucher (any model). */
+  forVoltageV?: BatteryVoltageV | null;
+}
+
+/** Snapshot of add-on on a booking. */
+export interface BookingAddon {
+  id: string;
+  kind: ChargingAddonKind;
+  label: string;
+  amps?: number;
+  priceIdr: number;
+  voucherCode?: string;
+}
+
 export interface Booking {
   id: string;
   code: string;
   operatorId: string;
   vehicleId: string;
+  modelId: string;
+  /** Fleet site of the assigned unit. */
+  siteId: string;
   riderName: string;
   status: BookingStatus;
   pickupType: PickupType;
+  /** Ride control: digital = app motor; key_handover = physical only. */
   rentalMode: "digital" | "key_handover";
+  /** App key, physical shop key, or both (shop pickup + app). */
+  keysAccess: KeysAccess;
+  /** Operator gave physical key to rider (shop handover). */
+  physicalKeyGiven: boolean;
+  /** Operator collected physical key on return. */
+  physicalKeyReturned: boolean;
   durationLabel: string;
   durationMinutes: number;
   rentalPriceIdr: number;
+  addonsPriceIdr: number;
+  addons: BookingAddon[];
   depositIdr: number;
   paymentMethod: PaymentMethod;
   paymentStatus: "pending" | "paid" | "refunded";
   startsAt: string | null;
   endsAt: string | null;
   motorOn: boolean;
+  createdAt: string;
+  rating: number | null;
+  reviewNote: string | null;
+}
+
+export interface OperatorReview {
+  id: string;
+  operatorId: string;
+  riderName: string;
+  rating: number;
+  note: string;
+  modelName: string;
   createdAt: string;
 }
 
