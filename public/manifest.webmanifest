@@ -1,0 +1,16 @@
+{
+  "name": "Casan Rent",
+  "short_name": "Casan Rent",
+  "description": "Multi-operator bike, e-bike, and e-moped rental",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef5f2",
+  "theme_color": "#0d6b5c",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
