@@ -72,6 +72,20 @@ export function formatReturnBy(
   });
 }
 
+export function formatOrderDateTime(value: string | null | undefined): string {
+  if (!value) return "Belum ditentukan";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Belum ditentukan";
+  return date.toLocaleString("id-ID", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function returnDueSummary(
   endsAt: string | null,
   durationMinutes?: number,

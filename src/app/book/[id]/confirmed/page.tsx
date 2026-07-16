@@ -5,7 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/Header";
 import { ContactActions } from "@/components/ContactActions";
 import { useAppStore } from "@/lib/store";
-import { formatIdr, keysAccessLabel, osmBrowseUrl } from "@/lib/format";
+import {
+  formatIdr,
+  formatOrderDateTime,
+  keysAccessLabel,
+  osmBrowseUrl,
+} from "@/lib/format";
+import { IS_DEMO } from "@/lib/demo";
 
 export default function BookingConfirmedPage() {
   const { id } = useParams<{ id: string }>();
@@ -44,9 +50,13 @@ export default function BookingConfirmedPage() {
   const keys = booking.keysAccess ?? "digital";
   const needsShop =
     keys === "physical" || keys === "both" || booking.pickupType === "front_desk";
+  const payAtCounter =
+    booking.paymentMethod === "pay_at_operator" &&
+    booking.paymentStatus === "pending";
   const waitingConfirm = booking.status === "pending";
   const ready =
-    booking.status === "confirmed" || booking.status === "awaiting_pickup";
+    !payAtCounter &&
+    (booking.status === "confirmed" || booking.status === "awaiting_pickup");
   const shopLat = site?.lat ?? op.lat;
   const shopLng = site?.lng ?? op.lng;
   const shopLabel =
@@ -66,6 +76,8 @@ export default function BookingConfirmedPage() {
         title={
           waitingConfirm
             ? "Waiting for operator"
+            : payAtCounter
+              ? "Pay at pickup"
             : ready
               ? "Ready for pickup"
               : "Your booking"
@@ -88,6 +100,8 @@ export default function BookingConfirmedPage() {
           {booking.durationLabel} · {op.name}
           {site ? ` · ${site.name}` : ""}
           <br />
+          Pickup appointment: {formatOrderDateTime(booking.appointmentAt)}
+          <br />
           Keys: {keysAccessLabel(keys)}
           <br />
           {formatIdr(
@@ -95,7 +109,11 @@ export default function BookingConfirmedPage() {
               (booking.addonsPriceIdr ?? 0) +
               booking.depositIdr,
           )}{" "}
-          paid (mock)
+          {booking.paymentStatus === "paid"
+            ? "paid"
+            : payAtCounter
+              ? "due at counter"
+              : "payment pending"}
           <br />
           via {booking.paymentMethod.replace(/_/g, " ")}
         </div>
@@ -142,9 +160,10 @@ export default function BookingConfirmedPage() {
         >
           <div className="font-semibold">Request sent — waiting for operator</div>
           <p className="mt-1" style={{ color: "var(--text2)" }}>
-            Staff must confirm shop / key bookings. Demo auto-approves in a few
-            seconds, or tap below to simulate.
+            Staff must confirm shop / key bookings. You will be notified when
+            the bike is ready.
           </p>
+          {IS_DEMO ? (
           <button
             type="button"
             className="mt-3 w-full rounded-xl py-2.5 text-xs font-bold text-white"
@@ -154,6 +173,7 @@ export default function BookingConfirmedPage() {
           >
             {simulating ? "Simulating operator…" : "Simulate operator confirm"}
           </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -163,6 +183,16 @@ export default function BookingConfirmedPage() {
           style={{ borderColor: "var(--ok)", background: "#E8F8F5" }}
         >
           Ready for pickup — show code <strong>{booking.code}</strong>.
+        </div>
+      ) : null}
+
+      {payAtCounter ? (
+        <div
+          className="mx-4 rounded-xl border p-4 text-sm"
+          style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
+        >
+          Pay at the shop when you collect the bike. Staff will mark the
+          payment received before the rental starts.
         </div>
       ) : null}
 
@@ -186,6 +216,8 @@ export default function BookingConfirmedPage() {
       >
         {waitingConfirm
           ? "Waiting for operator confirm…"
+          : payAtCounter
+            ? "Go to shop · pay and collect"
           : needsShop
             ? keys === "both"
               ? "I've arrived — collect key + start"

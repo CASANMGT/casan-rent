@@ -7,6 +7,7 @@ import { ContactActions } from "@/components/ContactActions";
 import { useAppStore } from "@/lib/store";
 import { batteryPctLabel, keysAccessLabel } from "@/lib/format";
 import { modelBatteryLabel } from "@/lib/catalog";
+import { IS_DEMO } from "@/lib/demo";
 
 export default function HandoverPage() {
   const { id } = useParams<{ id: string }>();
@@ -107,9 +108,10 @@ export default function HandoverPage() {
             Waiting for operator to hand over the physical key…
             <br />
             <span style={{ color: "var(--text2)" }}>
-              In real life staff taps “Give key” in their app. For this demo,
-              simulate it below.
+              Staff must confirm “Give key” in the operator app before you can
+              start.
             </span>
+            {IS_DEMO ? (
             <button
               type="button"
               className="mt-2 w-full rounded-xl py-2.5 text-xs font-bold text-white"
@@ -131,6 +133,7 @@ export default function HandoverPage() {
                 ? "Staff handing over key…"
                 : "Demo: simulate staff gives key"}
             </button>
+            ) : null}
           </div>
         ) : needsPhys && booking.physicalKeyGiven ? (
           <div

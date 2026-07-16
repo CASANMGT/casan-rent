@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.6";
+export const APP_VERSION = "0.4.7";
 
 export interface ChangelogEntry {
   version: string;
@@ -9,6 +9,16 @@ export interface ChangelogEntry {
 
 /** Newest first — shown in What's New for riders and operators. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.4.7",
+    date: "2026-07-16",
+    title: "Location fleet, appointments & UX polish",
+    highlights: [
+      "Operator fleet: manage bikes per location with stock, hours, WA, store info",
+      "Pickup appointments on booking; order timeline + paid extension history",
+      "Cleaner checkout (sticky total, collapsed charging) and clearer trip statuses",
+    ],
+  },
   {
     version: "0.4.6",
     date: "2026-07-16",

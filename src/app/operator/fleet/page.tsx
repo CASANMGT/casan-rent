@@ -1,18 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { Bike, Gauge, MapPin, MoveRight, Plus, Tag, Zap } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Bike,
+  CircleAlert,
+  Clock,
+  MapPin,
+  MessageCircle,
+  MoveRight,
+  Pencil,
+  Plus,
+  Tag,
+  Trash2,
+  Warehouse,
+} from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
 import { Header } from "@/components/Header";
 import { AuthGate } from "@/components/AuthGate";
 import { CityBadge, AreaBadge, OpSection } from "@/components/operator/OperatorUi";
 import { useAppStore } from "@/lib/store";
 import { formatIdrShort, vehicleTypeLabel } from "@/lib/format";
-import { groupSitesByArea, uniqueAreas, uniqueCities } from "@/lib/operator-ui";
+import { groupSitesByArea, uniqueAreas } from "@/lib/operator-ui";
 import type { RentalMode, VehicleStatus, VehicleType } from "@/lib/types";
-
-const TYPE_ORDER: VehicleType[] = ["bicycle", "ebike", "emoped"];
 
 export default function FleetPage() {
   return (
@@ -33,6 +43,7 @@ function FleetInner() {
   const removeVehicle = useAppStore((s) => s.removeVehicle);
   const adjustFleetStock = useAppStore((s) => s.adjustFleetStock);
   const addSite = useAppStore((s) => s.addSite);
+  const updateSite = useAppStore((s) => s.updateSite);
   const removeSite = useAppStore((s) => s.removeSite);
   const moveVehicleSite = useAppStore((s) => s.moveVehicleSite);
   const setToast = useAppStore((s) => s.setToast);
@@ -52,7 +63,6 @@ function FleetInner() {
   );
 
   const [siteFilter, setSiteFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<VehicleType | "all">("all");
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | VehicleStatus | "free">("free");
   const [panel, setPanel] = useState<"none" | "add" | "site" | "move">("none");
@@ -70,62 +80,84 @@ function FleetInner() {
   const [siteAddress, setSiteAddress] = useState("");
   const [siteCity, setSiteCity] = useState("");
   const [siteArea, setSiteArea] = useState("");
+  const [siteHours, setSiteHours] = useState("07:00 - 20:00");
+  const [siteWhatsapp, setSiteWhatsapp] = useState("");
+  const [siteInfo, setSiteInfo] = useState("");
+  const [siteLat, setSiteLat] = useState("");
+  const [siteLng, setSiteLng] = useState("");
   const [siteDesk, setSiteDesk] = useState(true);
   const [siteSelf, setSiteSelf] = useState(true);
-  const [cityFilter, setCityFilter] = useState<string>("all");
-  const [areaFilter, setAreaFilter] = useState<string>("all");
-
+  const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const operators = useAppStore((s) => s.operators);
   const op = operators.find((o) => o.id === opId);
-  const cities = uniqueCities(opSites);
   const areas = uniqueAreas(opSites);
   const sitesByArea = groupSitesByArea(opSites);
+  const validSiteIds = useMemo(
+    () => new Set(opSites.map((site) => site.id)),
+    [opSites],
+  );
+  const isUnassigned = (siteId: string) => !validSiteIds.has(siteId);
+
+  const locationSummaries = useMemo(
+    () => [
+      ...opSites.map((site) => {
+        const units = fleet.filter((v) => v.siteId === site.id);
+        return {
+          id: site.id,
+          site,
+          total: units.length,
+          free: units.filter((v) => v.status === "available").length,
+          onRent: units.filter((v) => v.status === "rented").length,
+          attention: units.filter((v) => v.status === "maintenance").length,
+          bicycles: units.filter((v) => v.vehicleType === "bicycle").length,
+          ebikes: units.filter((v) => v.vehicleType === "ebike").length,
+          emopeds: units.filter((v) => v.vehicleType === "emoped").length,
+        };
+      }),
+      {
+        id: "unassigned",
+        site: null,
+        total: fleet.filter((v) => isUnassigned(v.siteId)).length,
+        free: fleet.filter(
+          (v) => isUnassigned(v.siteId) && v.status === "available",
+        ).length,
+        onRent: fleet.filter(
+          (v) => isUnassigned(v.siteId) && v.status === "rented",
+        ).length,
+        attention: fleet.filter(
+          (v) => isUnassigned(v.siteId) && v.status === "maintenance",
+        ).length,
+        bicycles: fleet.filter(
+          (v) => isUnassigned(v.siteId) && v.vehicleType === "bicycle",
+        ).length,
+        ebikes: fleet.filter(
+          (v) => isUnassigned(v.siteId) && v.vehicleType === "ebike",
+        ).length,
+        emopeds: fleet.filter(
+          (v) => isUnassigned(v.siteId) && v.vehicleType === "emoped",
+        ).length,
+      },
+    ],
+    [fleet, opSites, validSiteIds],
+  );
 
   const activeSiteId = addSiteId || opSites[0]?.id || "";
   const hourPrice = pricing[opId]?.[1]?.priceIdr;
 
-  const byType = useMemo(() => {
-    return TYPE_ORDER.map((t) => {
-      const units = fleet.filter((v) => {
-        if (siteFilter !== "all" && v.siteId !== siteFilter) return false;
-        if (cityFilter !== "all") {
-          const site = opSites.find((s) => s.id === v.siteId);
-          if (site?.city !== cityFilter) return false;
-        }
-        if (areaFilter !== "all") {
-          const site = opSites.find((s) => s.id === v.siteId);
-          if (site?.area !== areaFilter) return false;
-        }
-        return v.vehicleType === t;
-      });
-      return {
-        type: t,
-        total: units.length,
-        free: units.filter((v) => v.status === "available").length,
-        onRent: units.filter((v) => v.status === "rented").length,
-        broken: units.filter((v) => v.status === "maintenance").length,
-        noBattery: t === "bicycle",
-        physicalOnly: t === "bicycle",
-      };
-    }).filter((x) => x.total > 0 || opModels.some((m) => m.vehicleType === x.type));
-  }, [fleet, siteFilter, cityFilter, areaFilter, opSites, opModels]);
-
   const freeEverywhere = fleet.filter((v) => v.status === "available").length;
+
+  useEffect(() => {
+    if (siteFilter !== "all") return;
+    if (opSites[0]?.id) setSiteFilter(opSites[0].id);
+  }, [opSites, siteFilter]);
 
   const list = useMemo(() => {
     return fleet
-      .filter((v) => siteFilter === "all" || v.siteId === siteFilter)
       .filter((v) => {
-        if (cityFilter === "all") return true;
-        const site = opSites.find((s) => s.id === v.siteId);
-        return site?.city === cityFilter;
+        if (siteFilter === "all") return true;
+        if (siteFilter === "unassigned") return isUnassigned(v.siteId);
+        return v.siteId === siteFilter;
       })
-      .filter((v) => {
-        if (areaFilter === "all") return true;
-        const site = opSites.find((s) => s.id === v.siteId);
-        return site?.area === areaFilter;
-      })
-      .filter((v) => typeFilter === "all" || v.vehicleType === typeFilter)
       .filter((v) => {
         if (filter === "all") return true;
         if (filter === "free") return v.status === "available";
@@ -140,7 +172,7 @@ function FleetInner() {
         if (b.status === "available" && a.status !== "available") return 1;
         return a.name.localeCompare(b.name);
       });
-  }, [fleet, siteFilter, cityFilter, areaFilter, opSites, typeFilter, filter, q]);
+  }, [fleet, siteFilter, validSiteIds, filter, q]);
 
   function submitAdd() {
     if (!opId || !activeSiteId) {
@@ -179,14 +211,86 @@ function FleetInner() {
     setModelPick("");
   }
 
+  function clearSiteForm() {
+    setSiteName("");
+    setSiteAddress("");
+    setSiteCity("");
+    setSiteArea("");
+    setSiteHours("07:00 - 20:00");
+    setSiteWhatsapp("");
+    setSiteInfo("");
+    setSiteLat(op ? String(op.lat) : "");
+    setSiteLng(op ? String(op.lng) : "");
+    setSiteDesk(true);
+    setSiteSelf(true);
+    setEditingSiteId(null);
+  }
+
+  function openAddSite() {
+    clearSiteForm();
+    setPanel("site");
+  }
+
+  function openEditSite(siteId: string) {
+    const site = opSites.find((x) => x.id === siteId);
+    if (!site) return;
+    setSiteName(site.name);
+    setSiteAddress(site.address);
+    setSiteCity(site.city);
+    setSiteArea(site.area);
+    setSiteHours(site.hours);
+    setSiteWhatsapp(site.whatsapp ?? op?.phone ?? "");
+    setSiteInfo(site.storeInfo ?? "");
+    setSiteLat(String(site.lat));
+    setSiteLng(String(site.lng));
+    setSiteDesk(site.supportsFrontDesk);
+    setSiteSelf(site.supportsSelfService);
+    setEditingSiteId(site.id);
+    setPanel("site");
+  }
+
   function submitSite() {
     if (!opId) return;
+    const lat = Number(siteLat);
+    const lng = Number(siteLng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      setToast("Valid latitude and longitude required");
+      return;
+    }
+    if (editingSiteId) {
+      const err = updateSite(editingSiteId, {
+        name: siteName,
+        address: siteAddress,
+        city: siteCity,
+        area: siteArea,
+        lat,
+        lng,
+        hours: siteHours,
+        whatsapp: siteWhatsapp,
+        storeInfo: siteInfo,
+        supportsFrontDesk: siteDesk,
+        supportsSelfService: siteSelf,
+      });
+      if (err) {
+        setToast(err);
+        return;
+      }
+      setToast("Location updated");
+      clearSiteForm();
+      setPanel("none");
+      return;
+    }
     const site = addSite({
       operatorId: opId,
       name: siteName,
       address: siteAddress,
       city: siteCity || op?.city,
       area: siteArea || siteName.trim(),
+      lat,
+      lng,
+      hours: siteHours,
+      whatsapp: siteWhatsapp || op?.phone,
+      storeInfo: siteInfo,
       supportsFrontDesk: siteDesk,
       supportsSelfService: siteSelf,
     });
@@ -197,10 +301,7 @@ function FleetInner() {
     setToast(`Place “${site.name}” added`);
     setSiteFilter(site.id);
     setAddSiteId(site.id);
-    setSiteName("");
-    setSiteAddress("");
-    setSiteCity("");
-    setSiteArea("");
+    clearSiteForm();
     setPanel("none");
   }
 
@@ -208,11 +309,22 @@ function FleetInner() {
     const free = fleet.filter(
       (v) =>
         v.status === "available" &&
-        (siteFilter === "all" || v.siteId === siteFilter) &&
+        (siteFilter === "all" ||
+          (siteFilter === "unassigned"
+            ? isUnassigned(v.siteId)
+            : v.siteId === siteFilter)) &&
         v.siteId !== targetSiteId,
     );
     if (free.length === 0) {
       setToast("No free bikes to move");
+      return;
+    }
+    const target = opSites.find((site) => site.id === targetSiteId);
+    if (
+      !window.confirm(
+        `Move ${free.length} ready bikes to ${target?.name ?? "this location"}?`,
+      )
+    ) {
       return;
     }
     free.forEach((v) => moveVehicleSite(v.id, targetSiteId));
@@ -234,7 +346,13 @@ function FleetInner() {
             <button
               type="button"
               className="flex items-center gap-1 text-xs font-bold text-white"
-              onClick={() => setPanel((p) => (p === "site" ? "none" : "site"))}
+              onClick={() => {
+                if (panel === "site" && !editingSiteId) {
+                  setPanel("none");
+                } else {
+                  openAddSite();
+                }
+              }}
             >
               <MapPin size={14} />
               Tempat
@@ -269,168 +387,224 @@ function FleetInner() {
         </div>
       </div>
 
-      <OpSection icon={Bike} title="3 jenis sepeda" hint="Tap a row to filter" />
-      <div className="mx-4 space-y-2">
-        {byType.map((row) => (
-          <button
-            key={row.type}
-            type="button"
-            className="flex w-full items-center gap-3 rounded-2xl p-3.5 text-left"
-            style={{
-              background: "var(--card)",
-              border:
-                typeFilter === row.type
-                  ? "2px solid var(--primary)"
-                  : "2px solid transparent",
-            }}
-            onClick={() =>
-              setTypeFilter((t) => (t === row.type ? "all" : row.type))
-            }
-          >
-            <div
-              className="flex h-11 w-11 items-center justify-center rounded-xl"
-              style={{
-                background: "color-mix(in srgb, var(--primary) 10%, white)",
-                color: "var(--primary)",
-              }}
-            >
-              {row.type === "bicycle" ? (
-                <Bike size={22} strokeWidth={2} />
-              ) : row.type === "ebike" ? (
-                <Zap size={22} strokeWidth={2} />
-              ) : (
-                <Gauge size={22} strokeWidth={2} />
-              )}
-            </div>
-            <div className="flex-1">
-              <div className="font-bold text-sm">{vehicleTypeLabel(row.type)}</div>
-              <div className="text-[11px]" style={{ color: "var(--text2)" }}>
-                {row.physicalOnly
-                  ? "Kunci fisik saja · tanpa baterai"
-                  : "Baterai + app / kunci"}
-              </div>
-            </div>
-            <div className="text-right text-xs font-semibold">
-              <div style={{ color: "var(--ok)" }}>{row.free} siap</div>
-              <div style={{ color: "var(--primary)" }}>{row.onRent} dipinjam</div>
-              <div style={{ color: "var(--text2)" }}>{row.total} total</div>
-            </div>
-          </button>
-        ))}
-      </div>
-      {typeFilter !== "all" ? (
-        <button
-          type="button"
-          className="mx-4 mt-2 text-xs font-bold"
-          style={{ color: "var(--primary)" }}
-          onClick={() => setTypeFilter("all")}
-        >
-          Tampilkan semua jenis
-        </button>
-      ) : null}
-
       <OpSection
-        icon={MapPin}
-        title="Filter by area"
-        hint="Jakarta locations are far apart — pick one area"
+        icon={Warehouse}
+        title="Sepeda per lokasi"
+        hint="Tap a location to see and manage its bikes"
       />
-
-      {areas.length > 1 ? (
-        <div className="flex gap-2 overflow-x-auto px-4 pb-2">
-          <button
-            type="button"
-            className={areaFilter === "all" ? "op-chip op-chip-active" : "op-chip"}
-            onClick={() => setAreaFilter("all")}
-          >
-            Semua area
-          </button>
-          {areas.map((a) => (
-            <button
-              key={a}
-              type="button"
-              className={areaFilter === a ? "op-chip op-chip-active" : "op-chip"}
-              onClick={() => {
-                setAreaFilter(a);
-                setSiteFilter("all");
-              }}
-            >
-              {a}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {cities.length > 1 ? (
-        <div className="flex gap-2 overflow-x-auto px-4 pb-2">
-          <button
-            type="button"
-            className={cityFilter === "all" ? "op-chip op-chip-active" : "op-chip"}
-            onClick={() => setCityFilter("all")}
-          >
-            Semua kota
-          </button>
-          {cities.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={cityFilter === c ? "op-chip op-chip-active" : "op-chip"}
-              onClick={() => {
-                setCityFilter(c);
-                setSiteFilter("all");
-              }}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="flex gap-2 overflow-x-auto px-4 pb-2">
-        <button
-          type="button"
-          className={siteFilter === "all" ? "op-chip op-chip-active" : "op-chip"}
-          onClick={() => setSiteFilter("all")}
-        >
-          Semua tempat
-        </button>
-        {opSites
-          .filter((s) => cityFilter === "all" || s.city === cityFilter)
-          .map((s) => {
-          const free = fleet.filter(
-            (v) => v.siteId === s.id && v.status === "available",
-          ).length;
+      <div className="mx-4 grid grid-cols-1 gap-2">
+        {locationSummaries.map((row) => {
+          const selected = siteFilter === row.id;
+          const unassigned = row.id === "unassigned";
           return (
             <button
-              key={s.id}
+              key={row.id}
               type="button"
-              className={siteFilter === s.id ? "op-chip op-chip-active" : "op-chip"}
+              className="rounded-2xl border p-3.5 text-left transition active:scale-[0.99]"
+              style={{
+                background: unassigned
+                  ? row.total > 0
+                    ? "#FEF5E7"
+                    : "var(--card)"
+                  : "var(--card)",
+                borderColor: selected
+                  ? "var(--primary)"
+                  : unassigned && row.total > 0
+                    ? "var(--warn)"
+                    : "var(--border)",
+                borderWidth: selected ? 2 : 1,
+              }}
               onClick={() => {
-                setSiteFilter(s.id);
-                setAddSiteId(s.id);
-                setCityFilter(s.city);
-                setAreaFilter(s.area);
+                setSiteFilter((current) =>
+                  current === row.id ? "all" : row.id,
+                );
+                setFilter("all");
+                if (row.site) setAddSiteId(row.site.id);
               }}
             >
-              {s.area} · {s.name} · {free}
+              <div className="flex items-start gap-3">
+                <span
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                  style={{
+                    background: unassigned
+                      ? "#FDEBD0"
+                      : "color-mix(in srgb, var(--primary) 10%, white)",
+                    color: unassigned ? "var(--warn)" : "var(--primary)",
+                  }}
+                >
+                  {unassigned ? (
+                    <CircleAlert size={20} />
+                  ) : (
+                    <MapPin size={20} />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-sm">
+                        {row.site?.name ?? "Belum ada lokasi · Unassigned"}
+                      </div>
+                      <div
+                        className="text-xs"
+                        style={{ color: "var(--text2)" }}
+                      >
+                        {row.site
+                          ? `${row.site.area} · ${row.site.city}`
+                          : row.total > 0
+                            ? "Assign these bikes before renting"
+                            : "All bikes have a location"}
+                      </div>
+                      {row.site ? (
+                        <div
+                          className="mt-0.5 line-clamp-1 text-[10px]"
+                          style={{ color: "var(--text2)" }}
+                        >
+                          {row.site.address} · {row.site.hours}
+                        </div>
+                      ) : null}
+                    </div>
+                    <span className="text-2xl font-bold tabular-nums">
+                      {row.total}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex gap-3 text-[11px] font-semibold">
+                    <span style={{ color: "var(--ok)" }}>
+                      {row.free} siap
+                    </span>
+                    <span style={{ color: "var(--primary)" }}>
+                      {row.onRent} dipinjam
+                    </span>
+                    {row.attention > 0 ? (
+                      <span style={{ color: "var(--danger)" }}>
+                        {row.attention} rusak
+                      </span>
+                    ) : null}
+                  </div>
+                  <div
+                    className="mt-1.5 text-[10px]"
+                    style={{ color: "var(--text2)" }}
+                  >
+                    {row.bicycles} bicycle · {row.ebikes} e-bike ·{" "}
+                    {row.emopeds} e-moped
+                  </div>
+                </div>
+              </div>
             </button>
           );
         })}
       </div>
+      {siteFilter !== "all" ? (
+        <button
+          type="button"
+          className="mx-4 mt-2 text-xs font-bold"
+          style={{ color: "var(--primary)" }}
+          onClick={() => setSiteFilter("all")}
+        >
+          Lihat semua lokasi
+        </button>
+      ) : null}
 
       {siteFilter !== "all" ? (
         <div className="card !py-3">
           {(() => {
+            if (siteFilter === "unassigned") {
+              const count = locationSummaries.find(
+                (row) => row.id === "unassigned",
+              )?.total;
+              return (
+                <>
+                  <div className="flex items-center gap-2">
+                    <CircleAlert size={18} style={{ color: "var(--warn)" }} />
+                    <div className="font-bold text-sm">
+                      {count} sepeda belum ada lokasi
+                    </div>
+                  </div>
+                  <p
+                    className="mt-1 text-xs"
+                    style={{ color: "var(--text2)" }}
+                  >
+                    Choose a location on each bike below. Unassigned bikes
+                    should not be offered for rental.
+                  </p>
+                </>
+              );
+            }
             const s = opSites.find((x) => x.id === siteFilter);
             if (!s) return null;
+            const summary = locationSummaries.find((row) => row.id === s.id);
             return (
               <>
-                <div className="flex flex-wrap items-center gap-2">
-                  <AreaBadge area={s.area} />
-                  <CityBadge city={s.city} />
-                  <div className="font-bold text-sm">{s.name}</div>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <AreaBadge area={s.area} />
+                      <CityBadge city={s.city} />
+                    </div>
+                    <div className="mt-1.5 font-bold">{s.name}</div>
+                    <div
+                      className="text-xs"
+                      style={{ color: "var(--text2)" }}
+                    >
+                      {s.address}
+                    </div>
+                    <div
+                      className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"
+                      style={{ color: "var(--text2)" }}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        <Clock size={12} /> {s.hours}
+                      </span>
+                      <a
+                        className="inline-flex items-center gap-1 font-semibold"
+                        style={{ color: "var(--ok)" }}
+                        href={`https://wa.me/${(s.whatsapp || op?.phone || "").replace(/\D/g, "")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <MessageCircle size={12} />
+                        WA {s.whatsapp || op?.phone || "not set"}
+                      </a>
+                    </div>
+                    {s.storeInfo ? (
+                      <p
+                        className="mt-2 rounded-lg px-2.5 py-2 text-xs"
+                        style={{
+                          background: "var(--bg-deep)",
+                          color: "var(--text2)",
+                        }}
+                      >
+                        {s.storeInfo}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold tabular-nums">
+                      {summary?.total ?? 0}
+                    </div>
+                    <div
+                      className="text-[10px]"
+                      style={{ color: "var(--text2)" }}
+                    >
+                      bikes assigned
+                    </div>
+                  </div>
                 </div>
-                <div className="text-xs" style={{ color: "var(--text2)" }}>
-                  {s.address}
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <LocationStat
+                    value={summary?.free ?? 0}
+                    label="Siap"
+                    color="var(--ok)"
+                  />
+                  <LocationStat
+                    value={summary?.onRent ?? 0}
+                    label="Dipinjam"
+                    color="var(--primary)"
+                  />
+                  <LocationStat
+                    value={summary?.attention ?? 0}
+                    label="Rusak"
+                    color="var(--danger)"
+                  />
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -447,11 +621,39 @@ function FleetInner() {
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg px-3 py-2 text-xs font-bold"
+                    className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold"
                     style={{ background: "var(--bg-deep)", color: "var(--primary)" }}
-                    onClick={() => setSiteFilter("all")}
+                    onClick={() => openEditSite(s.id)}
                   >
-                    Lihat semua tempat
+                    <Pencil size={14} />
+                    Edit lokasi
+                  </button>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold"
+                    style={{ background: "#FADBD8", color: "var(--danger)" }}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Delete ${s.name}? ${summary?.total ?? 0} idle bikes will become Unassigned.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      const err = removeSite(s.id);
+                      if (err) {
+                        setToast(err);
+                        return;
+                      }
+                      setToast(
+                        `Location deleted · ${summary?.total ?? 0} bikes moved to Unassigned`,
+                      );
+                      setSiteFilter("unassigned");
+                      setPanel("none");
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    Delete
                   </button>
                 </div>
               </>
@@ -508,7 +710,9 @@ function FleetInner() {
 
       {panel === "site" ? (
         <div className="card space-y-2">
-          <div className="font-bold text-sm">Tambah tempat baru</div>
+          <div className="font-bold text-sm">
+            {editingSiteId ? "Edit lokasi" : "Tambah lokasi baru"}
+          </div>
           <input
             className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
             style={{ borderColor: "var(--border)" }}
@@ -537,6 +741,55 @@ function FleetInner() {
             value={siteAddress}
             onChange={(e) => setSiteAddress(e.target.value)}
           />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="number"
+              step="any"
+              className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+              style={{ borderColor: "var(--border)" }}
+              placeholder="Latitude"
+              aria-label="Location latitude"
+              value={siteLat}
+              onChange={(e) => setSiteLat(e.target.value)}
+            />
+            <input
+              type="number"
+              step="any"
+              className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+              style={{ borderColor: "var(--border)" }}
+              placeholder="Longitude"
+              aria-label="Location longitude"
+              value={siteLng}
+              onChange={(e) => setSiteLng(e.target.value)}
+            />
+          </div>
+          <p className="text-xs" style={{ color: "var(--text2)" }}>
+            These coordinates control discovery distance and the return
+            geofence. Copy the exact pin from OpenStreetMap.
+          </p>
+          <input
+            className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+            style={{ borderColor: "var(--border)" }}
+            placeholder="Jam buka (contoh: 07:00 - 20:00)"
+            value={siteHours}
+            onChange={(e) => setSiteHours(e.target.value)}
+          />
+          <input
+            type="tel"
+            className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+            style={{ borderColor: "var(--border)" }}
+            placeholder="Nomor WhatsApp lokasi"
+            value={siteWhatsapp}
+            onChange={(e) => setSiteWhatsapp(e.target.value)}
+          />
+          <textarea
+            className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+            style={{ borderColor: "var(--border)" }}
+            rows={3}
+            placeholder="Informasi toko: patokan, lantai, cara ambil kunci…"
+            value={siteInfo}
+            onChange={(e) => setSiteInfo(e.target.value)}
+          />
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -553,45 +806,36 @@ function FleetInner() {
             />
             App self-collect pin
           </label>
-          <button type="button" className="btn-primary !mx-0 !w-full" onClick={submitSite}>
-            Save place
-          </button>
-          {opSites.map((s) => (
-            <div
-              key={s.id}
-              className="flex items-center justify-between rounded-lg px-3 py-2 text-sm"
-              style={{ background: "var(--bg-deep)" }}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              className="btn-secondary !mx-0 !mt-0 !w-full"
+              onClick={() => {
+                clearSiteForm();
+                setPanel("none");
+              }}
             >
-              <div>
-                <div className="font-semibold">{s.name}</div>
-                <div className="text-xs" style={{ color: "var(--text2)" }}>
-                  {s.address}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="text-xs font-bold"
-                style={{ color: "var(--danger)" }}
-                onClick={() => {
-                  const err = removeSite(s.id);
-                  if (err) setToast(err);
-                  else {
-                    setToast("Place removed");
-                    if (siteFilter === s.id) setSiteFilter("all");
-                  }
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          ))}
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-primary !mx-0 !mt-0 !w-full"
+              onClick={submitSite}
+            >
+              {editingSiteId ? "Save changes" : "Add location"}
+            </button>
+          </div>
         </div>
       ) : null}
 
       {/* Stock +/- when a place is selected */}
-      {siteFilter !== "all" ? (
+      {siteFilter !== "all" && siteFilter !== "unassigned" ? (
         <>
-          <p className="section-label">Add / remove stock here</p>
+          <OpSection
+            icon={Plus}
+            title="Tambah stok semua model"
+            hint="Every fleet model can be added to this location"
+          />
           {opModels.map((m) => {
             const units = fleet.filter(
               (v) => v.modelId === m.id && v.siteId === siteFilter,
@@ -618,9 +862,13 @@ function FleetInner() {
                 </div>
                 <button
                   type="button"
+                  aria-label={`Remove one ${m.name}`}
                   className="flex h-9 w-9 items-center justify-center rounded-full text-lg font-bold"
                   style={{ background: "#FADBD8", color: "var(--danger)" }}
                   onClick={() => {
+                    if (!window.confirm(`Remove one available ${m.name}?`)) {
+                      return;
+                    }
                     const err = adjustFleetStock({
                       modelId: m.id,
                       siteId: siteFilter,
@@ -634,6 +882,7 @@ function FleetInner() {
                 </button>
                 <button
                   type="button"
+                  aria-label={`Add one ${m.name}`}
                   className="flex h-9 w-9 items-center justify-center rounded-full text-lg font-bold text-white"
                   style={{ background: "var(--ok)" }}
                   onClick={() => {
@@ -654,45 +903,53 @@ function FleetInner() {
         </>
       ) : null}
 
-      <div className="flex gap-2 px-4 pb-2 pt-2">
-        <input
-          className="flex-1 rounded-xl border px-3 py-2.5 text-sm outline-none"
-          style={{ borderColor: "var(--border)", background: "var(--card)" }}
-          placeholder="Search bike code…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-      </div>
-      <div className="flex gap-2 overflow-x-auto px-4 pb-2">
-        {(
-          [
-            ["free", "Free ✓"],
-            ["all", "All"],
-            ["rented", "On rent"],
-            ["reserved", "Waiting"],
-            ["maintenance", "Broken"],
-          ] as const
-        ).map(([f, label]) => (
-          <button
-            key={f}
-            type="button"
-            className="whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-bold"
-            style={{
-              borderColor: filter === f ? "var(--ok)" : "var(--border)",
-              background:
-                filter === f
-                  ? f === "free"
-                    ? "var(--ok)"
-                    : "var(--primary)"
-                  : "var(--card)",
-              color: filter === f ? "white" : "var(--text)",
-            }}
-            onClick={() => setFilter(f)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {siteFilter !== "all" ? (
+        <>
+          <div className="flex gap-2 px-4 pb-2 pt-2">
+            <input
+              className="flex-1 rounded-xl border px-3 py-2.5 text-sm outline-none"
+              style={{
+                borderColor: "var(--border)",
+                background: "var(--card)",
+              }}
+              placeholder="Search bike code…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div className="flex gap-2 overflow-x-auto px-4 pb-2">
+            {(
+              [
+                ["all", "All"],
+                ["free", "Free ✓"],
+                ["rented", "On rent"],
+                ["reserved", "Waiting"],
+                ["maintenance", "Broken"],
+              ] as const
+            ).map(([f, label]) => (
+              <button
+                key={f}
+                type="button"
+                className="whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-bold"
+                style={{
+                  borderColor:
+                    filter === f ? "var(--primary)" : "var(--border)",
+                  background:
+                    filter === f
+                      ? f === "free"
+                        ? "var(--ok)"
+                        : "var(--primary)"
+                      : "var(--card)",
+                  color: filter === f ? "white" : "var(--text)",
+                }}
+                onClick={() => setFilter(f)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
 
       {panel === "add" ? (
         <div className="card space-y-2">
@@ -780,8 +1037,16 @@ function FleetInner() {
         </div>
       ) : null}
 
+      {siteFilter !== "all" ? (
+        <>
       <p className="section-label">
-        {filter === "free" ? "Free bikes (highlighted)" : "Bikes"}
+        {siteFilter === "unassigned"
+          ? "Unassigned bikes"
+          : siteFilter !== "all"
+            ? `Bikes at ${opSites.find((s) => s.id === siteFilter)?.name ?? "location"}`
+            : filter === "free"
+              ? "Free bikes (highlighted)"
+              : "All bikes"}
       </p>
       {list.length === 0 ? (
         <p className="p-8 text-center text-sm" style={{ color: "var(--text2)" }}>
@@ -846,12 +1111,29 @@ function FleetInner() {
                 <select
                   className="rounded-lg px-2 py-2 text-xs font-bold outline-none"
                   style={{ background: "var(--bg-deep)" }}
-                  value={v.siteId}
+                  value={site ? v.siteId : ""}
                   onChange={(e) => {
+                    const destination = opSites.find(
+                      (candidate) => candidate.id === e.target.value,
+                    );
+                    if (
+                      !window.confirm(
+                        e.target.value
+                          ? `Move ${v.code} to ${destination?.name ?? "this location"}?`
+                          : `Mark ${v.code} as Unassigned?`,
+                      )
+                    ) {
+                      return;
+                    }
                     moveVehicleSite(v.id, e.target.value);
-                    setToast(`Moved to new place`);
+                    setToast(
+                      e.target.value
+                        ? "Moved to new place"
+                        : "Bike marked unassigned",
+                    );
                   }}
                 >
+                  <option value="">Belum ada lokasi · Unassigned</option>
                   {opSites.map((s) => (
                     <option key={s.id} value={s.id}>
                       Move → {s.name}
@@ -891,6 +1173,9 @@ function FleetInner() {
                       setToast("Finish rental first");
                       return;
                     }
+                    if (!window.confirm(`Remove bike ${v.code} from the fleet?`)) {
+                      return;
+                    }
                     removeVehicle(v.id);
                     setToast("Removed");
                   }}
@@ -902,7 +1187,49 @@ function FleetInner() {
           );
         })
       )}
+        </>
+      ) : (
+        <div
+          className="mx-4 mt-4 rounded-2xl border p-5 text-center"
+          style={{ background: "var(--card)", borderColor: "var(--border)" }}
+        >
+          <MapPin
+            size={28}
+            className="mx-auto"
+            style={{ color: "var(--primary)" }}
+          />
+          <div className="mt-2 font-bold">Belum ada lokasi dipilih</div>
+          <p className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
+            Tap kartu lokasi di atas untuk melihat stok model, jam buka, WhatsApp,
+            dan daftar sepeda.
+          </p>
+        </div>
+      )}
       <BottomNav variant="operator" />
+    </div>
+  );
+}
+
+function LocationStat({
+  value,
+  label,
+  color,
+}: {
+  value: number;
+  label: string;
+  color: string;
+}) {
+  return (
+    <div
+      className="rounded-xl px-2 py-2.5 text-center"
+      style={{ background: "var(--bg-deep)" }}
+    >
+      <div className="text-lg font-bold tabular-nums" style={{ color }}>
+        {value}
+      </div>
+      <div className="text-[10px]" style={{ color: "var(--text2)" }}>
+        {label}
+      </div>
     </div>
   );
 }

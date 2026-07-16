@@ -75,6 +75,10 @@ export interface OperatorSite {
   lat: number;
   lng: number;
   hours: string;
+  /** Location-specific WhatsApp number; falls back to operator phone. */
+  whatsapp?: string;
+  /** Short instructions / description shown to staff and riders. */
+  storeInfo?: string;
   supportsFrontDesk: boolean;
   supportsSelfService: boolean;
   shopPickupLabel: string;
@@ -176,6 +180,15 @@ export interface BookingAddon {
   voucherCode?: string;
 }
 
+export interface BookingExtension {
+  id: string;
+  requestedAt: string;
+  extraMinutes: number;
+  priceIdr: number;
+  previousEndsAt: string;
+  newEndsAt: string;
+}
+
 export interface Booking {
   id: string;
   code: string;
@@ -203,8 +216,13 @@ export interface Booking {
   depositIdr: number;
   paymentMethod: PaymentMethod;
   paymentStatus: "pending" | "paid" | "refunded";
+  /** Rider's planned pickup appointment. */
+  appointmentAt?: string | null;
   startsAt: string | null;
   endsAt: string | null;
+  completedAt?: string | null;
+  /** Paid extension requests, newest last. */
+  extensions?: BookingExtension[];
   motorOn: boolean;
   createdAt: string;
   rating: number | null;

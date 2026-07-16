@@ -27,12 +27,30 @@ import {
 } from "@/lib/catalog";
 import { Header } from "@/components/Header";
 
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function defaultAppointmentInput(): string {
+  const d = new Date(Date.now() + 60 * 60_000);
+  d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0);
+  return toLocalInput(d);
+}
+
+function appointmentSlot(hoursFromNow: number, label: string) {
+  const d = new Date(Date.now() + hoursFromNow * 60_000);
+  d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0);
+  return { label, value: toLocalInput(d) };
+}
+
 export default function ModelDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const models = useAppStore((s) => s.models);
   const vehicles = useAppStore((s) => s.vehicles);
   const operators = useAppStore((s) => s.operators);
+  const sites = useAppStore((s) => s.sites);
   const pricing = useAppStore((s) => s.pricing);
   const reviews = useAppStore((s) => s.reviews);
   const bookings = useAppStore((s) => s.bookings);
@@ -43,6 +61,20 @@ export default function ModelDetailPage() {
   const model = models.find((m) => m.id === id);
   const op = operators.find((o) => o.id === model?.operatorId);
   const units = model ? availableUnits(vehicles, model.id) : [];
+  const availableSites = useMemo(
+    () =>
+      sites
+        .filter(
+          (site) =>
+            site.operatorId === model?.operatorId &&
+            units.some((unit) => unit.siteId === site.id),
+        )
+        .map((site) => ({
+          site,
+          count: units.filter((unit) => unit.siteId === site.id).length,
+        })),
+    [sites, units, model?.operatorId],
+  );
   const rating = op
     ? operatorRatingStats(op.id, bookings, reviews)
     : { avg: 0, count: 0, reviews: [] };
@@ -67,10 +99,17 @@ export default function ModelDetailPage() {
   const [pickup, setPickup] = useState<PickupType>(
     model?.allowFrontDesk ? "front_desk" : "self_service",
   );
-  const [tierIdx, setTierIdx] = useState(1);
+  const [tierIdx, setTierIdx] = useState(0);
   const [simAck, setSimAck] = useState(false);
   const [voucherId, setVoucherId] = useState<string | null>(null);
   const [adapterId, setAdapterId] = useState<string | null>(null);
+  const [showCharging, setShowCharging] = useState(false);
+  const [appointmentInput, setAppointmentInput] = useState(
+    defaultAppointmentInput,
+  );
+  const [selectedSiteId, setSelectedSiteId] = useState(
+    units[0]?.siteId ?? "",
+  );
 
   if (!model || !op) {
     return (
@@ -88,11 +127,23 @@ export default function ModelDetailPage() {
   const addonsTotal = selectedAddons.reduce((s, a) => s + a.priceIdr, 0);
   const total = tier.priceIdr + addonsTotal + DEPOSIT_IDR;
   const selectedAdapter = adapters.find((a) => a.id === adapterId);
+  const selectedSite =
+    availableSites.find(({ site }) => site.id === selectedSiteId)?.site ??
+    availableSites[0]?.site;
+  const selectedSiteUnits = units.filter(
+    (unit) => unit.siteId === selectedSite?.id,
+  );
+  const appointmentMs = new Date(appointmentInput).getTime();
+  const appointmentValid =
+    Boolean(appointmentInput) &&
+    Number.isFinite(appointmentMs) &&
+    appointmentMs >= Date.now();
   const canBook =
-    units.length > 0 &&
-    (units[0].batteryPct == null ||
-      units.some((u) => (u.batteryPct ?? 100) >= 30)) &&
-    (!model.requiresSimAck || simAck);
+    selectedSiteUnits.length > 0 &&
+    (selectedSiteUnits[0].batteryPct == null ||
+      selectedSiteUnits.some((u) => (u.batteryPct ?? 100) >= 30)) &&
+    (!model.requiresSimAck || simAck) &&
+    appointmentValid;
 
   async function book() {
     if (!canBook) return;
@@ -101,12 +152,14 @@ export default function ModelDetailPage() {
     );
     const booking = createBooking({
       modelId: model!.id,
+      siteId: selectedSite?.id,
       pickupType: pickup,
       durationLabel: tier.label,
       durationMinutes: tier.durationMinutes,
       rentalPriceIdr: tier.priceIdr,
       paymentMethod: "qris",
       addonIds,
+      appointmentAt: new Date(appointmentMs).toISOString(),
     });
     if (!booking) {
       setToast("No units available right now");
@@ -116,12 +169,19 @@ export default function ModelDetailPage() {
     router.push(`/book/${booking.id}`);
   }
 
+  const slots = [
+    appointmentSlot(60, "In 1 hour"),
+    appointmentSlot(120, "In 2 hours"),
+    appointmentSlot(24 * 60, "Tomorrow"),
+  ];
+
   return (
-    <div className="pb-8">
+    <div className="pb-32">
       <div className="relative">
         <PhotoGallery images={model.images} alt={model.name} tall />
         <button
           type="button"
+          aria-label="Go back"
           className="absolute left-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-black/35 text-xl text-white"
           onClick={() => router.back()}
         >
@@ -237,71 +297,141 @@ export default function ModelDetailPage() {
 
       {model.vehicleType !== "bicycle" && model.batteryVoltageV != null ? (
         <>
-      <p className="section-label">Charging add-ons</p>
-      <div className="mx-4 mb-2 rounded-xl p-3 text-xs" style={{ background: "var(--bg-deep)" }}>
-        <div className="font-semibold" style={{ color: "var(--primary)" }}>
-          Casan charging voucher
-        </div>
-        <p className="mt-1" style={{ color: "var(--text2)" }}>
-          Redeem overnight slots at Casan hubs near campus / kost.
-        </p>
-      </div>
-      <AddonChoice
-        selected={voucherId === null}
-        title="No voucher"
-        desc="Skip — charge at home or later"
-        price={0}
-        onClick={() => setVoucherId(null)}
-      />
-      {vouchers.map((v) => (
-        <AddonChoice
-          key={v.id}
-          selected={voucherId === v.id}
-          title={v.label}
-          desc={v.description}
-          price={v.priceIdr}
-          onClick={() => setVoucherId(v.id)}
-        />
-      ))}
+          <div className="mt-2 px-4">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left text-sm font-semibold"
+              style={{
+                borderColor: "var(--border)",
+                background: "var(--card)",
+              }}
+              onClick={() => setShowCharging((v) => !v)}
+              aria-expanded={showCharging}
+            >
+              <span>Need overnight charge?</span>
+              <span style={{ color: "var(--text2)" }}>
+                {showCharging ? "Hide" : "Show"}
+                {selectedAddons.length
+                  ? ` · ${selectedAddons.length} selected`
+                  : " · optional"}
+              </span>
+            </button>
+          </div>
+          {showCharging ? (
+            <>
+              <p className="section-label">Charging voucher</p>
+              <div
+                className="mx-4 mb-2 rounded-xl p-3 text-xs"
+                style={{ background: "var(--bg-deep)" }}
+              >
+                <div className="font-semibold" style={{ color: "var(--primary)" }}>
+                  Casan charging voucher
+                </div>
+                <p className="mt-1" style={{ color: "var(--text2)" }}>
+                  Redeem overnight slots at Casan hubs near campus / kost.
+                </p>
+              </div>
+              <AddonChoice
+                selected={voucherId === null}
+                title="No voucher"
+                desc="Skip — charge at home or later"
+                price={0}
+                onClick={() => setVoucherId(null)}
+              />
+              {vouchers.map((v) => (
+                <AddonChoice
+                  key={v.id}
+                  selected={voucherId === v.id}
+                  title={v.label}
+                  desc={v.description}
+                  price={v.priceIdr}
+                  onClick={() => setVoucherId(v.id)}
+                />
+              ))}
 
-      <div className="mx-4 mb-2 mt-3 rounded-xl p-3 text-xs" style={{ background: "var(--bg-deep)" }}>
-        <div className="font-semibold" style={{ color: "var(--primary)" }}>
-          Include charging adapter ({model.batteryVoltageV}V only)
-        </div>
-        <p className="mt-1" style={{ color: "var(--text2)" }}>
-          Recommended default: {model.chargerAmpsDefault}A for kost overnight.
-        </p>
-      </div>
-      <AddonChoice
-        selected={adapterId === null}
-        title="No adapter"
-        desc="Use Casan voucher or your own matching charger"
-        price={0}
-        onClick={() => setAdapterId(null)}
-      />
-      {adapters.map((a) => (
-        <AddonChoice
-          key={a.id}
-          selected={adapterId === a.id}
-          title={a.label}
-          desc={a.description}
-          price={a.priceIdr}
-          warn={a.amps != null && a.amps >= 5}
-          onClick={() => setAdapterId(a.id)}
-        />
-      ))}
-      {selectedAdapter && (selectedAdapter.amps ?? 0) >= 5 ? (
-        <div
-          className="mx-4 mb-2 rounded-xl border p-3 text-xs"
-          style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
-        >
-          <strong>Kost warning:</strong> {selectedAdapter.amps}A may trip shared
-          900 VA outlets. Prefer a Casan hub bay for daytime fast charge.
-        </div>
+              <p className="section-label">Portable adapter</p>
+              <div
+                className="mx-4 mb-2 rounded-xl p-3 text-xs"
+                style={{ background: "var(--bg-deep)" }}
+              >
+                <div className="font-semibold" style={{ color: "var(--primary)" }}>
+                  Include charging adapter ({model.batteryVoltageV}V only)
+                </div>
+                <p className="mt-1" style={{ color: "var(--text2)" }}>
+                  Recommended default: {model.chargerAmpsDefault}A for kost overnight.
+                </p>
+              </div>
+              <AddonChoice
+                selected={adapterId === null}
+                title="No adapter"
+                desc="Use Casan voucher or your own matching charger"
+                price={0}
+                onClick={() => setAdapterId(null)}
+              />
+              {adapters.map((a) => (
+                <AddonChoice
+                  key={a.id}
+                  selected={adapterId === a.id}
+                  title={a.label}
+                  desc={a.description}
+                  price={a.priceIdr}
+                  warn={a.amps != null && a.amps >= 5}
+                  onClick={() => setAdapterId(a.id)}
+                />
+              ))}
+              {selectedAdapter && (selectedAdapter.amps ?? 0) >= 5 ? (
+                <div
+                  className="mx-4 mb-2 rounded-xl border p-3 text-xs"
+                  style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
+                >
+                  <strong>Kost warning:</strong> {selectedAdapter.amps}A may trip
+                  shared 900 VA outlets. Prefer a Casan hub bay for daytime fast
+                  charge.
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </>
       ) : null}
 
-      </>
-      ) : null}
+      <p className="section-label">Choose pickup location</p>
+      <div className="mx-4 space-y-2">
+        {availableSites.map(({ site, count }) => (
+          <button
+            key={site.id}
+            type="button"
+            className="w-full rounded-2xl border-2 p-3.5 text-left"
+            style={{
+              borderColor:
+                selectedSite?.id === site.id
+                  ? "var(--primary)"
+                  : "var(--border)",
+              background:
+                selectedSite?.id === site.id
+                  ? "color-mix(in srgb, var(--primary) 8%, white)"
+                  : "var(--card)",
+            }}
+            onClick={() => setSelectedSiteId(site.id)}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-bold text-sm">{site.name}</div>
+                <div className="text-xs" style={{ color: "var(--text2)" }}>
+                  {site.area} · {site.address}
+                  <br />
+                  Open {site.hours}
+                </div>
+              </div>
+              <span
+                className="rounded-full px-2.5 py-1 text-xs font-bold"
+                style={{ background: "#E8F8F5", color: "var(--ok)" }}
+              >
+                {count} available
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
 
       <p className="section-label">How will you pick up?</p>
       {model.rentalMode === "both" || model.rentalMode === "key_handover" ? (
@@ -368,6 +498,56 @@ export default function ModelDetailPage() {
         </>
       ) : null}
 
+      <p className="section-label">Pickup appointment</p>
+      <div className="card !py-3">
+        <label className="text-sm font-bold" htmlFor="pickup-appointment">
+          Date and time to collect
+        </label>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {slots.map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              className="rounded-full border px-3 py-1.5 text-xs font-semibold"
+              style={{
+                borderColor:
+                  appointmentInput === s.value
+                    ? "var(--primary)"
+                    : "var(--border)",
+                background:
+                  appointmentInput === s.value
+                    ? "color-mix(in srgb, var(--primary) 12%, white)"
+                    : "var(--bg)",
+                color:
+                  appointmentInput === s.value
+                    ? "var(--primary)"
+                    : "var(--text2)",
+              }}
+              onClick={() => setAppointmentInput(s.value)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <input
+          id="pickup-appointment"
+          type="datetime-local"
+          className="mt-2 w-full rounded-xl border px-3 py-3 text-sm outline-none"
+          style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+          value={appointmentInput}
+          min={toLocalInput(new Date())}
+          onChange={(e) => setAppointmentInput(e.target.value)}
+        />
+        <p className="mt-1.5 text-xs" style={{ color: "var(--text2)" }}>
+          The operator will see this appointment on your order.
+        </p>
+        {!appointmentValid ? (
+          <p className="mt-1 text-xs font-semibold" style={{ color: "var(--warn)" }}>
+            Pick a time in the future
+          </p>
+        ) : null}
+      </div>
+
       <p className="section-label">Duration</p>
       <div className="grid grid-cols-3 gap-2 px-4">
         {tiers.slice(0, 9).map((t, i) => (
@@ -407,60 +587,54 @@ export default function ModelDetailPage() {
         </label>
       ) : null}
 
-      <div className="card mt-3">
-        <div className="flex justify-between py-2 text-sm">
-          <span>Rental ({tier.label})</span>
-          <span>{formatIdr(tier.priceIdr)}</span>
-        </div>
-        {selectedAddons.map((a) => (
-          <div key={a.id} className="flex justify-between py-1 text-sm">
-            <span>{a.label}</span>
-            <span>{formatIdr(a.priceIdr)}</span>
-          </div>
-        ))}
-        <div
-          className="flex justify-between border-t border-dashed py-2 text-sm"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <span>Security deposit</span>
-          <span>{formatIdr(DEPOSIT_IDR)}</span>
-        </div>
-        <div
-          className="flex justify-between border-t-2 pt-3 text-base font-bold"
-          style={{ borderColor: "var(--text)" }}
-        >
-          <span>Total due</span>
-          <span>{formatIdr(total)}</span>
-        </div>
-        <p className="mt-2 text-xs" style={{ color: "var(--text2)" }}>
-          A free unit is assigned automatically at booking
-          {units[0] ? ` (e.g. ${units[0].code})` : ""}.
-        </p>
-      </div>
-
-      <button
-        type="button"
-        className="btn-primary"
-        disabled={!canBook}
-        style={{ opacity: canBook ? 1 : 0.5 }}
-        onClick={book}
-      >
-        {units.length === 0 ? "Sold out" : "Continue to payment"}
-      </button>
-      {!canBook && units.length > 0 ? (
-        <p
-          className="-mt-2 px-6 pb-2 text-center text-xs font-semibold"
-          style={{ color: "var(--warn)" }}
-        >
-          {model.requiresSimAck && !simAck
-            ? "Tick the SIM / license box above to continue"
-            : "All units are low on battery right now — try again soon"}
-        </p>
-      ) : null}
-
       <div className="card">
         <div className="mb-2 font-bold text-sm">Questions? Contact {op.name}</div>
         <ContactActions phone={op.phone} email={op.email} name={op.name} />
+      </div>
+
+      <div
+        className="fixed bottom-0 left-1/2 z-40 w-full max-w-[430px] -translate-x-1/2 border-t px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3"
+        style={{
+          background: "color-mix(in srgb, var(--card) 94%, transparent)",
+          borderColor: "var(--border)",
+          backdropFilter: "blur(10px)",
+        }}
+      >
+        <div className="mb-2 flex items-end justify-between gap-3">
+          <div>
+            <div className="text-[11px]" style={{ color: "var(--text2)" }}>
+              {tier.label}
+              {selectedAddons.length
+                ? ` · +${selectedAddons.length} add-on`
+                : ""}
+            </div>
+            <div className="text-lg font-extrabold">{formatIdr(total)}</div>
+            <div className="text-[11px]" style={{ color: "var(--text2)" }}>
+              Incl. {formatIdrShort(DEPOSIT_IDR)} refundable deposit
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-primary !mt-0 !w-auto shrink-0 px-5 py-3"
+            disabled={!canBook}
+            style={{ opacity: canBook ? 1 : 0.5 }}
+            onClick={book}
+          >
+            {units.length === 0 ? "Sold out" : "Continue"}
+          </button>
+        </div>
+        {!canBook && units.length > 0 ? (
+          <p
+            className="pb-1 text-center text-xs font-semibold"
+            style={{ color: "var(--warn)" }}
+          >
+            {model.requiresSimAck && !simAck
+              ? "Tick the SIM / license box above to continue"
+              : !appointmentValid
+                ? "Choose a future pickup appointment"
+                : "All units are low on battery right now — try again soon"}
+          </p>
+        ) : null}
       </div>
     </div>
   );

@@ -44,6 +44,7 @@ export function BottomNav({ variant }: { variant: "rider" | "operator" }) {
 
   return (
     <nav
+      aria-label={variant === "operator" ? "Operator navigation" : "Rider navigation"}
       className="fixed bottom-0 left-1/2 z-50 flex w-full max-w-[430px] -translate-x-1/2 justify-around border-t px-0.5 py-1.5"
       style={{
         background: "var(--card)",
@@ -60,14 +61,16 @@ export function BottomNav({ variant }: { variant: "rider" | "operator" }) {
           <Link
             key={href}
             href={href}
+            aria-current={active ? "page" : undefined}
+            aria-label={hint ? `${label} · ${hint}` : label}
             className="flex min-w-0 flex-1 flex-col items-center gap-0.5 px-1 py-1"
             style={{ color: active ? "var(--primary)" : "var(--text2)" }}
           >
             <Icon size={22} strokeWidth={active ? 2.4 : 2} />
-            <span className="text-[10px] font-bold leading-tight">{label}</span>
+            <span className="text-[11px] font-bold leading-tight">{label}</span>
             {variant === "operator" && hint ? (
               <span
-                className="text-[8px] font-medium leading-none opacity-80"
+                className="text-[9px] font-medium leading-none opacity-80"
                 style={{ color: active ? "var(--primary)" : "var(--text2)" }}
               >
                 {hint}

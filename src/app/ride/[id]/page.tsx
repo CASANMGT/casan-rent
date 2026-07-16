@@ -23,6 +23,7 @@ import { CalendarClock, MapPin, Navigation } from "lucide-react";
 import { MockMap } from "@/components/MockMap";
 import { StarRating, StarsText } from "@/components/StarRating";
 import type { Booking, PaymentMethod } from "@/lib/types";
+import { IS_DEMO } from "@/lib/demo";
 
 /** Mirrors the store's extendRide pricing: pro-rata on the current rate. */
 function extendPriceFor(booking: Booking, extraMinutes: number): number {
@@ -37,7 +38,6 @@ const extendPayMethods: { id: PaymentMethod; name: string }[] = [
   { id: "ovo", name: "OVO" },
   { id: "gopay", name: "GoPay" },
   { id: "shopeepay", name: "ShopeePay" },
-  { id: "pay_at_operator", name: "Cash / counter" },
 ];
 
 export default function RidePage() {
@@ -182,6 +182,8 @@ export default function RidePage() {
     const pos = riderPos ?? { lat: USER_LAT, lng: USER_LNG };
     const metersAway = distanceMeters(pos.lat, pos.lng, zoneLat, zoneLng);
     const inZone = isInsideReturnGeofence(pos.lat, pos.lng, zoneLat, zoneLng);
+    const needsPhysicalReturn =
+      booking.keysAccess === "physical" || booking.keysAccess === "both";
 
     function refreshGps() {
       setLocating(true);
@@ -295,6 +297,7 @@ export default function RidePage() {
               </p>
             ) : null}
 
+            {IS_DEMO ? (
             <div
               className="mx-4 mt-1 rounded-xl border p-3 text-xs"
               style={{ borderColor: "var(--border)", background: "var(--bg)" }}
@@ -337,6 +340,7 @@ export default function RidePage() {
                 </button>
               </div>
             </div>
+            ) : null}
 
             <button
               type="button"
@@ -366,30 +370,47 @@ export default function RidePage() {
         {returnStep === 2 ? (
           <>
             <div className="card text-sm">
-              {booking.rentalMode === "digital"
+              {!needsPhysicalReturn
                 ? "Lock the vehicle via app. Parking photo optional (mock)."
-                : "Hand the physical key to staff and wait for inspection."}
+                : booking.physicalKeyReturned
+                  ? "Staff confirmed that the physical key is back."
+                  : "Hand the physical key to staff. Return stays locked until staff confirms receipt."}
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={async () => {
-                await fetch("/api/iot", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    command: "lock",
-                    vehicleId: vehicle.id,
-                    bookingId: booking.id,
-                  }),
-                });
-                setReturnStep(3);
-              }}
-            >
-              {booking.rentalMode === "digital"
-                ? "Lock vehicle"
-                : "Key returned"}
-            </button>
+            {!needsPhysicalReturn ? (
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={async () => {
+                  await fetch("/api/iot", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      command: "lock",
+                      vehicleId: vehicle.id,
+                      bookingId: booking.id,
+                    }),
+                  });
+                  setReturnStep(3);
+                }}
+              >
+                Lock vehicle
+              </button>
+            ) : booking.physicalKeyReturned ? (
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setReturnStep(3)}
+              >
+                Staff received key · continue
+              </button>
+            ) : (
+              <div
+                className="mx-4 rounded-xl border px-4 py-3 text-center text-sm font-semibold"
+                style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
+              >
+                Waiting for staff to confirm the key…
+              </div>
+            )}
           </>
         ) : null}
         {returnStep === 3 ? (
@@ -754,7 +775,7 @@ export default function RidePage() {
                   onClick={async () => {
                     setExtendPaying(true);
                     try {
-                      await fetch("/api/payment", {
+                      const response = await fetch("/api/payment", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -764,14 +785,24 @@ export default function RidePage() {
                           purpose: "extension",
                         }),
                       });
+                      const data = await response.json().catch(() => ({}));
+                      if (!response.ok) {
+                        throw new Error(
+                          data.message || "Extension payment failed",
+                        );
+                      }
                       extendRide(booking.id, extendMins);
                       setToast(
                         `Paid ${formatIdr(extendPriceFor(booking, extendMins))} · extended ${formatExtendLabel(extendMins)}`,
                       );
                       setExtendOpen(false);
                       setExtendMins(null);
-                    } catch {
-                      setToast("Payment failed — try again");
+                    } catch (error) {
+                      setToast(
+                        error instanceof Error
+                          ? error.message
+                          : "Payment failed — try again",
+                      );
                     } finally {
                       setExtendPaying(false);
                     }

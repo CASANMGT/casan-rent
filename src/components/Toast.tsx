@@ -13,5 +13,14 @@ export function Toast() {
     return () => clearTimeout(t);
   }, [toast, setToast]);
 
-  return <div className={`toast ${toast ? "show" : ""}`}>{toast}</div>;
+  return (
+    <div
+      className={`toast ${toast ? "show" : ""}`}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      {toast}
+    </div>
+  );
 }

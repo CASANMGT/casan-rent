@@ -29,6 +29,32 @@ function tripHref(status: string, paymentStatus: string, id: string) {
   return `/book/${id}/confirmed`;
 }
 
+function tripStatusLabel(status: string, paymentStatus: string) {
+  if (
+    paymentStatus === "pending" &&
+    !["active", "completed", "cancelled", "overdue"].includes(status)
+  ) {
+    return "Pay to continue";
+  }
+  switch (status) {
+    case "pending":
+      return "Waiting for shop";
+    case "confirmed":
+    case "awaiting_pickup":
+      return "Ready to collect";
+    case "active":
+      return "On ride";
+    case "overdue":
+      return "Overdue — return now";
+    case "completed":
+      return "Completed";
+    case "cancelled":
+      return "Cancelled";
+    default:
+      return status.replace("_", " ");
+  }
+}
+
 const PAST_STATUSES = ["completed", "cancelled"] as const;
 
 function HistoryInner() {
@@ -121,12 +147,13 @@ function HistoryInner() {
 
 function TripCard({ booking: b, name }: { booking: Booking; name: string }) {
   const href = tripHref(b.status, b.paymentStatus, b.id);
+  const label = tripStatusLabel(b.status, b.paymentStatus);
   const inner = (
     <>
-      <div className="flex justify-between">
+      <div className="flex justify-between gap-3">
         <div className="font-bold">{name}</div>
         <div
-          className="text-xs font-semibold capitalize"
+          className="shrink-0 text-right text-xs font-semibold"
           style={{
             color:
               b.status === "overdue"
@@ -139,10 +166,7 @@ function TripCard({ booking: b, name }: { booking: Booking; name: string }) {
                     : "var(--primary)",
           }}
         >
-          {b.paymentStatus === "pending" &&
-          !["active", "completed", "cancelled", "overdue"].includes(b.status)
-            ? "Pay to continue"
-            : b.status.replace("_", " ")}
+          {label}
         </div>
       </div>
       <div className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
@@ -154,12 +178,26 @@ function TripCard({ booking: b, name }: { booking: Booking; name: string }) {
           </>
         ) : null}
       </div>
+      {b.status === "cancelled" ? (
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <p className="text-xs" style={{ color: "var(--text2)" }}>
+            This booking was cancelled. You can book again anytime.
+          </p>
+          <Link
+            href="/home"
+            className="shrink-0 text-xs font-bold"
+            style={{ color: "var(--primary)" }}
+          >
+            Rebook →
+          </Link>
+        </div>
+      ) : null}
     </>
   );
   if (b.status === "cancelled") {
     return (
       <div
-        className="mx-4 mb-2.5 rounded-2xl p-4 opacity-70"
+        className="mx-4 mb-2.5 rounded-2xl p-4"
         style={{ background: "var(--card)" }}
       >
         {inner}

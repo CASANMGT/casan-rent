@@ -1,0 +1,2 @@
+/** Demo-only controls must be explicitly enabled in the environment. */
+export const IS_DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";

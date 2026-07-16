@@ -16,7 +16,7 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "Casan Rent — Multi-Operator Mobility",
   description:
-    "Rent bicycles, e-bikes, and e-mopeds from multiple operators across Bali.",
+    "Rent bicycles, e-bikes, and e-mopeds from trusted locations across Indonesia.",
   applicationName: "Casan Rent",
   appleWebApp: {
     capable: true,
@@ -28,7 +28,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
   themeColor: "#0d6b5c",
 };
 
@@ -38,7 +37,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${figtree.variable} ${fraunces.variable}`}>
+    <html lang="id" className={`${figtree.variable} ${fraunces.variable}`}>
       <body className="grain antialiased">
         <AppProviders>{children}</AppProviders>
       </body>

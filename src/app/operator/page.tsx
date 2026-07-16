@@ -24,6 +24,7 @@ import {
   SiteRow,
 } from "@/components/operator/OperatorUi";
 import { useAppStore } from "@/lib/store";
+import { IS_DEMO } from "@/lib/demo";
 import { formatIdr, formatIdrShort } from "@/lib/format";
 import { groupSitesByArea, OP, uniqueAreas, uniqueCities } from "@/lib/operator-ui";
 import type { VehicleType } from "@/lib/types";
@@ -193,7 +194,8 @@ function DashboardInner() {
 
       {pending.length === 0 ? (
         <div className="op-card text-sm" style={{ color: "var(--text2)" }}>
-          Tidak ada yang menunggu. Latihan dengan tombol demo di bawah.
+          Tidak ada permintaan baru.
+          {IS_DEMO ? (
           <button
             type="button"
             className="mt-3 w-full rounded-xl py-3 text-sm font-bold text-white"
@@ -205,6 +207,7 @@ function DashboardInner() {
           >
             Demo: pelanggan mau sewa
           </button>
+          ) : null}
         </div>
       ) : (
         pending.map((b) => {
@@ -253,6 +256,7 @@ function DashboardInner() {
                   className="flex items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold"
                   style={{ background: "#FADBD8", color: "var(--danger)" }}
                   onClick={() => {
+                    if (!window.confirm(`Tolak pesanan ${b.code}?`)) return;
                     declineBooking(b.id);
                     setToast("Ditolak — sepeda bebas lagi");
                   }}

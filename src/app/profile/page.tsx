@@ -8,6 +8,7 @@ import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import { APP_VERSION, hasUnseenUpdates } from "@/lib/version";
 import { osmBrowseUrl } from "@/lib/format";
+import { IS_DEMO } from "@/lib/demo";
 
 export default function ProfilePage() {
   return (
@@ -72,6 +73,9 @@ function ProfileInner() {
         <span className="font-semibold">Dark mode</span>
         <button
           type="button"
+          role="switch"
+          aria-checked={darkMode}
+          aria-label="Dark mode"
           className="relative h-6 w-11 rounded-full"
           style={{ background: darkMode ? "var(--primary)" : "var(--border)" }}
           onClick={toggleDarkMode}
@@ -98,6 +102,7 @@ function ProfileInner() {
         </a>
       </div>
 
+      {IS_DEMO ? (
       <button
         type="button"
         className="btn-secondary"
@@ -108,6 +113,7 @@ function ProfileInner() {
       >
         Reset demo data
       </button>
+      ) : null}
       <button
         type="button"
         className="btn-danger"

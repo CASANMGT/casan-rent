@@ -2,17 +2,31 @@
 
 import { useMemo, useState } from "react";
 import {
+  CalendarDays,
+  ChevronDown,
+  ChevronUp,
   CircleCheck,
   CircleX,
   Clock,
+  Flag,
   KeyRound,
+  PlayCircle,
+  TimerReset,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
 import { Header } from "@/components/Header";
 import { CityBadge, AreaBadge } from "@/components/operator/OperatorUi";
 import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
-import { formatIdr, formatReturnBy, returnDueSummary } from "@/lib/format";
+import {
+  formatExtendLabel,
+  formatIdr,
+  formatOrderDateTime,
+  formatReturnBy,
+  returnDueSummary,
+} from "@/lib/format";
+import { IS_DEMO } from "@/lib/demo";
 
 type Tab = "new" | "active" | "done";
 
@@ -39,10 +53,14 @@ function BookingsInner() {
   const givePhysicalKey = useAppStore((s) => s.givePhysicalKey);
   const collectPhysicalKey = useAppStore((s) => s.collectPhysicalKey);
   const completeReturn = useAppStore((s) => s.completeReturn);
+  const payBooking = useAppStore((s) => s.payBooking);
   const simulateRiderRequest = useAppStore((s) => s.simulateRiderRequest);
   const setToast = useAppStore((s) => s.setToast);
 
   const [tab, setTab] = useState<Tab>("new");
+  const [openDetailIds, setOpenDetailIds] = useState<Record<string, boolean>>(
+    {},
+  );
 
   const mine = useMemo(
     () => bookings.filter((b) => b.operatorId === user.operatorId),
@@ -61,6 +79,10 @@ function BookingsInner() {
   }, [mine, tab]);
 
   const newCount = mine.filter((b) => b.status === "pending").length;
+  const availableCount = vehicles.filter(
+    (v) =>
+      v.operatorId === user.operatorId && v.status === "available",
+  ).length;
   const activeCount = mine.filter((b) =>
     ["confirmed", "awaiting_pickup", "active", "overdue"].includes(b.status),
   ).length;
@@ -77,6 +99,7 @@ function BookingsInner() {
       <Header
         title="Pesanan · Orders"
         right={
+          IS_DEMO ? (
           <button
             type="button"
             className="text-[11px] font-bold text-white"
@@ -87,6 +110,7 @@ function BookingsInner() {
           >
             + Demo
           </button>
+          ) : null
         }
       />
 
@@ -105,6 +129,8 @@ function BookingsInner() {
       </p>
 
       <div
+        role="tablist"
+        aria-label="Order status"
         className="mx-4 mt-3 flex gap-1 rounded-xl p-1"
         style={{ background: "var(--card)" }}
       >
@@ -118,6 +144,8 @@ function BookingsInner() {
           <button
             key={id}
             type="button"
+            role="tab"
+            aria-selected={tab === id}
             className="flex-1 rounded-lg py-2.5 text-xs font-bold"
             style={{
               background: tab === id ? "var(--primary)" : "transparent",
@@ -130,12 +158,42 @@ function BookingsInner() {
         ))}
       </div>
 
+      {tab === "new" ? (
+        <div className="mx-4 mt-3 grid grid-cols-2 gap-2">
+          <div
+            className="rounded-xl border p-3"
+            style={{ background: "#FEF5E7", borderColor: "var(--warn)" }}
+          >
+            <div className="text-2xl font-bold" style={{ color: "var(--warn)" }}>
+              {newCount}
+            </div>
+            <div className="text-xs font-semibold">Permintaan baru</div>
+          </div>
+          <div
+            className="rounded-xl border p-3"
+            style={{ background: "#E8F8F5", borderColor: "var(--ok)" }}
+          >
+            <div className="text-2xl font-bold" style={{ color: "var(--ok)" }}>
+              {availableCount}
+            </div>
+            <div className="text-xs font-semibold">Sepeda tersedia</div>
+          </div>
+        </div>
+      ) : null}
+
       {tab === "new" && list.length > 1 ? (
         <button
           type="button"
           className="mx-4 mt-3 w-[calc(100%-32px)] rounded-xl py-3 text-sm font-bold text-white"
           style={{ background: "var(--ok)" }}
           onClick={() => {
+            if (
+              !window.confirm(
+                `Accept all ${list.length} new requests? Review appointment and availability first.`,
+              )
+            ) {
+              return;
+            }
             confirmBulk(list.map((b) => b.id));
             setToast(`Diterima ${list.length} pesanan`);
           }}
@@ -148,12 +206,12 @@ function BookingsInner() {
         <div className="px-6 py-10 text-center">
           <p className="text-sm" style={{ color: "var(--text2)" }}>
             {tab === "new"
-              ? "Tidak ada permintaan baru. Tekan “+ Demo”."
+              ? "Tidak ada permintaan baru."
               : tab === "active"
                 ? "Tidak ada yang sedang menyewa."
                 : "Belum ada trip selesai."}
           </p>
-          {tab === "new" ? (
+          {tab === "new" && IS_DEMO ? (
             <button
               type="button"
               className="mt-4 rounded-xl px-5 py-3 text-sm font-bold text-white"
@@ -168,9 +226,25 @@ function BookingsInner() {
         list.map((b) => {
           const v = vehicles.find((x) => x.id === b.vehicleId);
           const site = sites.find((s) => s.id === b.siteId || s.id === v?.siteId);
+          const availableAtSite = vehicles.filter(
+            (x) =>
+              x.operatorId === b.operatorId &&
+              x.siteId === b.siteId &&
+              x.status === "available",
+          ).length;
           const phys = needsPhysicalKey(b.keysAccess);
           const returnDue = returnDueSummary(b.endsAt, b.durationMinutes);
           const expectedReturn = formatReturnBy(b.endsAt, b.durationMinutes);
+          const plannedFinish =
+            b.endsAt ??
+            (b.appointmentAt
+              ? new Date(
+                  new Date(b.appointmentAt).getTime() +
+                    b.durationMinutes * 60_000,
+                ).toISOString()
+              : null);
+          const finishLabel =
+            b.status === "completed" ? "Selesai aktual" : "Selesai perkiraan";
           const onTrip = ["confirmed", "awaiting_pickup", "active", "overdue"].includes(
             b.status,
           );
@@ -242,6 +316,147 @@ function BookingsInner() {
                 ) : null}
               </div>
 
+              <div
+                className="mt-3 flex items-center justify-between gap-3 rounded-xl px-3 py-2.5"
+                style={{ background: "var(--bg-deep)" }}
+              >
+                <div>
+                  <div
+                    className="text-[10px] font-semibold uppercase"
+                    style={{ color: "var(--text2)" }}
+                  >
+                    Status sepeda
+                  </div>
+                  <div className="text-sm font-bold">
+                    {v?.status === "reserved"
+                      ? "Dipesan untuk permintaan ini"
+                      : v?.status === "available"
+                        ? "Tersedia"
+                        : v?.status === "rented"
+                          ? "Sedang dipinjam"
+                          : v?.status === "maintenance"
+                            ? "Rusak / maintenance"
+                            : v?.status ?? "Unknown"}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-bold" style={{ color: "var(--ok)" }}>
+                    {availableAtSite}
+                  </div>
+                  <div className="text-[10px]" style={{ color: "var(--text2)" }}>
+                    tersedia di toko
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className="mt-3 overflow-hidden rounded-xl border"
+                style={{ borderColor: "var(--border)" }}
+              >
+                <OrderTimeRow
+                  icon={CalendarDays}
+                  label="Janji ambil"
+                  value={formatOrderDateTime(b.appointmentAt)}
+                  tone="var(--warn)"
+                  last={!openDetailIds[b.id]}
+                />
+                {openDetailIds[b.id] ? (
+                  <>
+                    <OrderTimeRow
+                      icon={PlayCircle}
+                      label="Diambil aktual"
+                      value={
+                        b.startsAt
+                          ? formatOrderDateTime(b.startsAt)
+                          : "Belum diambil"
+                      }
+                      tone="var(--primary)"
+                    />
+                    <OrderTimeRow
+                      icon={Flag}
+                      label={finishLabel}
+                      value={formatOrderDateTime(
+                        b.completedAt ?? plannedFinish,
+                      )}
+                      tone={
+                        b.status === "overdue"
+                          ? "var(--danger)"
+                          : "var(--ok)"
+                      }
+                      last
+                    />
+                  </>
+                ) : null}
+              </div>
+
+              <button
+                type="button"
+                className="mt-2 flex w-full items-center justify-center gap-1 text-xs font-bold"
+                style={{ color: "var(--primary)" }}
+                onClick={() =>
+                  setOpenDetailIds((prev) => ({
+                    ...prev,
+                    [b.id]: !prev[b.id],
+                  }))
+                }
+              >
+                {openDetailIds[b.id] ? (
+                  <>
+                    Sembunyikan detail <ChevronUp size={14} />
+                  </>
+                ) : (
+                  <>
+                    Detail waktu
+                    {(b.extensions?.length ?? 0) > 0
+                      ? ` · ${b.extensions!.length} extend`
+                      : ""}{" "}
+                    <ChevronDown size={14} />
+                  </>
+                )}
+              </button>
+
+              {openDetailIds[b.id] && (b.extensions?.length ?? 0) > 0 ? (
+                <div
+                  className="mt-3 rounded-xl border p-3"
+                  style={{
+                    borderColor: "var(--primary)",
+                    background:
+                      "color-mix(in srgb, var(--primary) 7%, white)",
+                  }}
+                >
+                  <div
+                    className="flex items-center gap-1.5 text-xs font-bold"
+                    style={{ color: "var(--primary)" }}
+                  >
+                    <TimerReset size={15} />
+                    Extend · sudah dibayar
+                  </div>
+                  {[...(b.extensions ?? [])].reverse().map((extension) => (
+                    <div
+                      key={extension.id}
+                      className="mt-2 border-t pt-2 text-xs"
+                      style={{ borderColor: "var(--border)" }}
+                    >
+                      <div className="flex justify-between gap-3 font-semibold">
+                        <span>{formatExtendLabel(extension.extraMinutes)}</span>
+                        <span>{formatIdr(extension.priceIdr)}</span>
+                      </div>
+                      <div
+                        className="mt-0.5"
+                        style={{ color: "var(--text2)" }}
+                      >
+                        Diminta {formatOrderDateTime(extension.requestedAt)}
+                        <br />
+                        Finish baru:{" "}
+                        <strong style={{ color: "var(--text)" }}>
+                          {formatOrderDateTime(extension.newEndsAt)}
+                        </strong>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               {onTrip ? (
                 <div
                   className="mt-3 rounded-xl px-3 py-2.5"
@@ -294,6 +509,7 @@ function BookingsInner() {
                     className="flex items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold"
                     style={{ background: "#FADBD8", color: "var(--danger)" }}
                     onClick={() => {
+                      if (!window.confirm(`Tolak pesanan ${b.code}?`)) return;
                       declineBooking(b.id);
                       setToast("Ditolak");
                     }}
@@ -304,8 +520,27 @@ function BookingsInner() {
                 </div>
               ) : null}
 
+              {b.paymentMethod === "pay_at_operator" &&
+              b.paymentStatus === "pending" &&
+              b.status !== "pending" &&
+              b.status !== "cancelled" ? (
+                <button
+                  type="button"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold text-white"
+                  style={{ background: "var(--ok)" }}
+                  onClick={() => {
+                    payBooking(b.id);
+                    setToast("Pembayaran di toko diterima");
+                  }}
+                >
+                  <CircleCheck size={20} />
+                  Konfirmasi pembayaran di toko
+                </button>
+              ) : null}
+
               {phys &&
               (b.status === "confirmed" || b.status === "awaiting_pickup") &&
+              b.paymentStatus === "paid" &&
               !b.physicalKeyGiven ? (
                 <button
                   type="button"
@@ -335,6 +570,13 @@ function BookingsInner() {
                     className="flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold text-white"
                     style={{ background: "var(--ok)" }}
                     onClick={() => {
+                      if (
+                        !window.confirm(
+                          "Confirm the key and bike are both back, then close this rental?",
+                        )
+                      ) {
+                        return;
+                      }
                       collectPhysicalKey(b.id);
                       completeReturn(b.id);
                       setToast("Kunci kembali · selesai");
@@ -349,6 +591,13 @@ function BookingsInner() {
                     className="w-full rounded-xl py-3 text-sm font-bold"
                     style={{ background: "var(--bg-deep)", color: "var(--text2)" }}
                     onClick={() => {
+                      if (
+                        !window.confirm(
+                          "Confirm only the key is back. The rental and timer will continue.",
+                        )
+                      ) {
+                        return;
+                      }
                       collectPhysicalKey(b.id);
                       setToast("Kunci sudah kembali — sewa masih jalan");
                     }}
@@ -378,6 +627,46 @@ function BookingsInner() {
         })
       )}
       <BottomNav variant="operator" />
+    </div>
+  );
+}
+
+function OrderTimeRow({
+  icon: Icon,
+  label,
+  value,
+  tone,
+  last = false,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  tone: string;
+  last?: boolean;
+}) {
+  return (
+    <div
+      className="flex items-center gap-3 px-3 py-2.5"
+      style={{
+        background: "var(--bg)",
+        borderBottom: last ? undefined : "1px solid var(--border)",
+      }}
+    >
+      <span
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+        style={{
+          background: `color-mix(in srgb, ${tone} 10%, white)`,
+          color: tone,
+        }}
+      >
+        <Icon size={16} />
+      </span>
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold" style={{ color: "var(--text2)" }}>
+          {label}
+        </div>
+        <div className="text-sm font-bold">{value}</div>
+      </div>
     </div>
   );
 }

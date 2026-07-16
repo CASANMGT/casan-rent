@@ -3,6 +3,19 @@
 All notable user-facing changes to Casan Rent are listed here.
 The same history appears in-app at **What's New** (`/updates`).
 
+## [0.4.7] — 2026-07-16
+
+### Rider
+- Booking: choose a **pickup appointment**; sticky total + Continue bar; charging add-ons collapsed by default
+- Quick appointment slots (in 1h / 2h / tomorrow); shortest duration tier selected first
+- Hub cards show real opening hours; trip history uses human status labels; cancelled trips offer **Rebook**
+
+### Operator
+- **Fleet by location**: tap a site for hours, WhatsApp, store info, model stock (+/−), and assigned bikes; unassigned bikes called out
+- Add/edit/delete locations (address, coords, hours, WA); deleting a site moves idle bikes to unassigned
+- Orders show appointment, actual pickup, finish time; paid extensions behind expandable detail; bike availability at that store
+- Demo simulation controls gated behind `NEXT_PUBLIC_DEMO_MODE`
+
 ## [0.4.6] — 2026-07-16
 
 ### Rider

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/Header";
 import { useAppStore } from "@/lib/store";
-import { formatIdr } from "@/lib/format";
+import { formatIdr, formatOrderDateTime } from "@/lib/format";
 import type { PaymentMethod } from "@/lib/types";
 
 const methods: { id: PaymentMethod; name: string; desc: string }[] = [
@@ -31,7 +31,10 @@ export default function BookPaymentPage() {
   const op = operators.find((o) => o.id === booking?.operatorId);
 
   const [method, setMethod] = useState<PaymentMethod>(
-    booking?.paymentMethod ?? "qris",
+    booking?.paymentMethod === "pay_at_operator" &&
+      booking.pickupType !== "front_desk"
+      ? "qris"
+      : (booking?.paymentMethod ?? "qris"),
   );
   const [loading, setLoading] = useState(false);
 
@@ -45,26 +48,41 @@ export default function BookPaymentPage() {
   }
 
   const total = booking.rentalPriceIdr + (booking.addonsPriceIdr ?? 0) + booking.depositIdr;
+  const bookingId = booking.id;
+  const visibleMethods = methods.filter(
+    (m) =>
+      m.id !== "pay_at_operator" || booking.pickupType === "front_desk",
+  );
 
   async function pay() {
     setLoading(true);
     try {
+      setPaymentMethod(bookingId, method);
+      if (method === "pay_at_operator") {
+        setToast("Pay at the counter when you collect the bike");
+        router.push(`/book/${bookingId}/confirmed`);
+        return;
+      }
       const res = await fetch("/api/payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          bookingId: booking!.id,
+          bookingId,
           method,
           amountIdr: total,
         }),
       });
-      const data = await res.json();
-      setPaymentMethod(booking!.id, method);
-      payBooking(booking!.id);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || "Payment was not completed");
+      }
+      payBooking(bookingId);
       setToast(data.message ?? "Payment succeeded (mock)");
-      router.push(`/book/${booking!.id}/confirmed`);
-    } catch {
-      setToast("Payment failed");
+      router.push(`/book/${bookingId}/confirmed`);
+    } catch (error) {
+      setToast(
+        error instanceof Error ? error.message : "Payment failed — try again",
+      );
     } finally {
       setLoading(false);
     }
@@ -83,6 +101,8 @@ export default function BookPaymentPage() {
           {booking.pickupType === "front_desk"
             ? "Front Desk"
             : "Self-Service"}
+          <br />
+          Appointment: {formatOrderDateTime(booking.appointmentAt)}
         </div>
         <div className="mt-3 flex justify-between border-t pt-3 text-sm" style={{ borderColor: "var(--border)" }}>
           <span>Rental</span>
@@ -105,10 +125,13 @@ export default function BookPaymentPage() {
       </div>
 
       <p className="section-label">Payment method</p>
-      {methods.map((m) => (
+      <div role="radiogroup" aria-label="Payment method">
+      {visibleMethods.map((m) => (
         <button
           key={m.id}
           type="button"
+          role="radio"
+          aria-checked={method === m.id}
           onClick={() => {
             setMethod(m.id);
             setPaymentMethod(booking.id, m.id);
@@ -137,6 +160,7 @@ export default function BookPaymentPage() {
           />
         </button>
       ))}
+      </div>
 
       <p className="mx-4 mt-2 text-center text-xs" style={{ color: "var(--text2)" }}>
         Payments are mocked via /api/payment — no real charge.
@@ -148,7 +172,11 @@ export default function BookPaymentPage() {
         disabled={loading}
         onClick={pay}
       >
-        {loading ? "Processing…" : `Pay ${formatIdr(total)}`}
+        {loading
+          ? "Processing…"
+          : method === "pay_at_operator"
+            ? "Reserve · pay at pickup"
+            : `Pay ${formatIdr(total)}`}
       </button>
     </div>
   );

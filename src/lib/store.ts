@@ -35,7 +35,8 @@ import type {
   VehicleType,
   RentalMode,
 } from "./types";
-import { bookingCode } from "./format";
+import { bookingCode, formatIdr, formatReturnBy } from "./format";
+import { IS_DEMO } from "./demo";
 import { APP_VERSION } from "./version";
 import { pickAssignableUnit } from "./catalog";
 
@@ -69,12 +70,14 @@ interface AppState {
   createBooking: (input: {
     vehicleId?: string;
     modelId?: string;
+    siteId?: string;
     pickupType: PickupType;
     durationLabel: string;
     durationMinutes: number;
     rentalPriceIdr: number;
     paymentMethod: PaymentMethod;
     addonIds?: string[];
+    appointmentAt?: string;
   }) => Booking | null;
   setPaymentMethod: (bookingId: string, method: PaymentMethod) => void;
   confirmBooking: (bookingId: string) => void;
@@ -98,9 +101,30 @@ interface AppState {
     address: string;
     city?: string;
     area?: string;
+    lat?: number;
+    lng?: number;
+    hours?: string;
+    whatsapp?: string;
+    storeInfo?: string;
     supportsFrontDesk: boolean;
     supportsSelfService: boolean;
   }) => OperatorSite | null;
+  updateSite: (
+    siteId: string,
+    input: {
+      name: string;
+      address: string;
+      city: string;
+      area: string;
+      lat: number;
+      lng: number;
+      hours: string;
+      whatsapp: string;
+      storeInfo: string;
+      supportsFrontDesk: boolean;
+      supportsSelfService: boolean;
+    },
+  ) => string | null;
   removeSite: (siteId: string) => string | null;
   addVehicle: (input: {
     operatorId: string;
@@ -237,7 +261,12 @@ export const useAppStore = create<AppState>()(
           modelId = vehicle?.modelId;
         } else if (input.modelId) {
           vehicle =
-            pickAssignableUnit(get().vehicles, input.modelId) ?? undefined;
+            pickAssignableUnit(
+              get().vehicles.filter(
+                (v) => !input.siteId || v.siteId === input.siteId,
+              ),
+              input.modelId,
+            ) ?? undefined;
         }
 
         if (!vehicle || vehicle.status !== "available" || !modelId) return null;
@@ -305,8 +334,11 @@ export const useAppStore = create<AppState>()(
           depositIdr: DEPOSIT_IDR,
           paymentMethod: input.paymentMethod,
           paymentStatus: "pending",
+          appointmentAt: input.appointmentAt ?? null,
           startsAt: null,
           endsAt: null,
+          completedAt: null,
+          extensions: [],
           motorOn: true,
           createdAt: new Date().toISOString(),
           rating: null,
@@ -410,7 +442,7 @@ export const useAppStore = create<AppState>()(
         }));
         // Demo: simulate operator accepting the request after a short delay.
         const after = get().bookings.find((b) => b.id === bookingId);
-        if (after?.status === "pending") {
+        if (IS_DEMO && after?.status === "pending") {
           window.setTimeout(() => {
             const still = get().bookings.find((b) => b.id === bookingId);
             if (still?.status === "pending") {
@@ -528,8 +560,9 @@ export const useAppStore = create<AppState>()(
         set((s) => {
           const booking = s.bookings.find((b) => b.id === bookingId);
           if (!booking?.endsAt) return s;
+          const previousEndsAt = booking.endsAt;
           const endsAt = new Date(
-            new Date(booking.endsAt).getTime() + extraMinutes * 60_000,
+            new Date(previousEndsAt).getTime() + extraMinutes * 60_000,
           );
           const perMin =
             booking.rentalPriceIdr / Math.max(1, booking.durationMinutes);
@@ -552,10 +585,31 @@ export const useAppStore = create<AppState>()(
                     durationMinutes: b.durationMinutes + extraMinutes,
                     durationLabel: `${b.durationLabel} ${addLabel}`,
                     rentalPriceIdr: b.rentalPriceIdr + extraPrice,
+                    extensions: [
+                      ...(b.extensions ?? []),
+                      {
+                        id: `ext-${Date.now()}`,
+                        requestedAt: new Date().toISOString(),
+                        extraMinutes,
+                        priceIdr: extraPrice,
+                        previousEndsAt,
+                        newEndsAt: endsAt.toISOString(),
+                      },
+                    ],
                   }
                 : b,
             ),
             toast: `Extended ${addLabel}`,
+            notifications: [
+              {
+                id: `n-extension-${bookingId}-${Date.now()}`,
+                title: "Rental extended",
+                body: `${booking.code} paid ${formatIdr(extraPrice)} for ${addLabel}. New return: ${formatReturnBy(endsAt.toISOString())}.`,
+                read: false,
+                createdAt: new Date().toISOString(),
+              },
+              ...s.notifications,
+            ],
           };
         }),
 
@@ -596,6 +650,7 @@ export const useAppStore = create<AppState>()(
                   status: "completed",
                   motorOn: false,
                   paymentStatus: "refunded",
+                  completedAt: new Date().toISOString(),
                   physicalKeyReturned: needsPhys
                     ? true
                     : b.physicalKeyReturned,
@@ -669,9 +724,11 @@ export const useAppStore = create<AppState>()(
           area: input.area?.trim() || input.name.trim(),
           name: input.name.trim(),
           address: input.address.trim() || input.name.trim(),
-          lat: op?.lat ?? 0,
-          lng: op?.lng ?? 0,
-          hours: "07:00 - 20:00",
+          lat: input.lat ?? op?.lat ?? 0,
+          lng: input.lng ?? op?.lng ?? 0,
+          hours: input.hours?.trim() || "07:00 - 20:00",
+          whatsapp: input.whatsapp?.trim() || op?.phone || "",
+          storeInfo: input.storeInfo?.trim() || "",
           supportsFrontDesk: input.supportsFrontDesk,
           supportsSelfService: input.supportsSelfService,
           shopPickupLabel: input.supportsFrontDesk
@@ -685,6 +742,39 @@ export const useAppStore = create<AppState>()(
         return site;
       },
 
+      updateSite: (siteId, input) => {
+        if (!input.name.trim()) return "Place name required";
+        const site = get().sites.find((x) => x.id === siteId);
+        if (!site) return "Place not found";
+        set((s) => ({
+          sites: s.sites.map((x) =>
+            x.id === siteId
+              ? {
+                  ...x,
+                  name: input.name.trim(),
+                  address: input.address.trim() || input.name.trim(),
+                  city: input.city.trim() || x.city,
+                  area: input.area.trim() || input.name.trim(),
+                  lat: input.lat,
+                  lng: input.lng,
+                  hours: input.hours.trim() || x.hours,
+                  whatsapp: input.whatsapp.trim(),
+                  storeInfo: input.storeInfo.trim(),
+                  supportsFrontDesk: input.supportsFrontDesk,
+                  supportsSelfService: input.supportsSelfService,
+                  shopPickupLabel: input.supportsFrontDesk
+                    ? `${input.name.trim()} counter`
+                    : "—",
+                  selfCollectLabel: input.supportsSelfService
+                    ? `${input.name.trim()} self-collect pin`
+                    : "—",
+                }
+              : x,
+          ),
+        }));
+        return null;
+      },
+
       removeSite: (siteId) => {
         const units = get().vehicles.filter((v) => v.siteId === siteId);
         if (units.some((v) => v.status === "rented" || v.status === "reserved")) {
@@ -692,7 +782,9 @@ export const useAppStore = create<AppState>()(
         }
         set((s) => ({
           sites: s.sites.filter((x) => x.id !== siteId),
-          vehicles: s.vehicles.filter((v) => v.siteId !== siteId),
+          vehicles: s.vehicles.map((v) =>
+            v.siteId === siteId ? { ...v, siteId: "" } : v,
+          ),
         }));
         return null;
       },
@@ -862,6 +954,13 @@ export const useAppStore = create<AppState>()(
 
       moveVehicleSite: (vehicleId, siteId) =>
         set((s) => {
+          if (!siteId) {
+            return {
+              vehicles: s.vehicles.map((v) =>
+                v.id === vehicleId ? { ...v, siteId: "" } : v,
+              ),
+            };
+          }
           const site = s.sites.find((x) => x.id === siteId);
           if (!site) return s;
           return {
@@ -935,8 +1034,11 @@ export const useAppStore = create<AppState>()(
           depositIdr: DEPOSIT_IDR,
           paymentMethod: "qris",
           paymentStatus: "paid",
+          appointmentAt: new Date(Date.now() + 45 * 60_000).toISOString(),
           startsAt: null,
           endsAt: null,
+          completedAt: null,
+          extensions: [],
           motorOn: true,
           createdAt: new Date().toISOString(),
           rating: null,

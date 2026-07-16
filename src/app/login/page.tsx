@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAppStore } from "@/lib/store";
+import { IS_DEMO } from "@/lib/demo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -180,9 +181,11 @@ export default function LoginPage() {
           <button type="button" className="btn-primary" onClick={doOperatorLogin}>
             Operator Login
           </button>
+          {IS_DEMO ? (
           <p className="px-6 text-center text-xs" style={{ color: "var(--text2)" }}>
             Demo: margonda.admin / casan2026
           </p>
+          ) : null}
         </div>
       )}
     </div>

@@ -173,6 +173,7 @@ function HomeInner() {
       >
         <Search size={18} style={{ color: "var(--text2)" }} />
         <input
+          aria-label="Search bikes and rental hubs"
           className="w-full border-none bg-transparent text-[15px] outline-none"
           placeholder="Search kost hub, model, operator…"
           value={query}
@@ -298,6 +299,7 @@ function HomeInner() {
                 name={op.name}
                 address={`${op.city} · ${op.address}`}
                 meta={`${op.count} bikes free`}
+                hours={op.hours}
                 ratingAvg={op.rating.count ? op.rating.avg : null}
                 distance={formatDistance(op.dist)}
               />
@@ -390,6 +392,7 @@ function OperatorRow({
   name,
   address,
   meta,
+  hours,
   distance,
   ratingAvg,
 }: {
@@ -398,6 +401,7 @@ function OperatorRow({
   name: string;
   address: string;
   meta: string;
+  hours: string;
   distance: string;
   ratingAvg?: number | null;
 }) {
@@ -432,10 +436,10 @@ function OperatorRow({
       <div className="text-right text-xs" style={{ color: "var(--text2)" }}>
         <div>{distance}</div>
         <div
-          className="mt-1 inline-flex rounded-full px-2 py-0.5 font-semibold"
-          style={{ background: "#E8F8F5", color: "var(--ok)" }}
+          className="mt-1 max-w-[7.5rem] text-[10px] font-semibold leading-tight"
+          style={{ color: "var(--ok)" }}
         >
-          Open
+          {hours}
         </div>
       </div>
     </Link>
