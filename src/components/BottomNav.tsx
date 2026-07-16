@@ -45,7 +45,7 @@ export function BottomNav({ variant }: { variant: "rider" | "operator" }) {
   return (
     <nav
       aria-label={variant === "operator" ? "Operator navigation" : "Rider navigation"}
-      className="fixed bottom-0 left-1/2 z-50 flex w-full max-w-[430px] -translate-x-1/2 justify-around border-t px-0.5 py-1.5"
+      className="fixed bottom-0 left-1/2 z-50 flex w-full max-w-[430px] -translate-x-1/2 justify-around border-t px-0.5 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]"
       style={{
         background: "var(--card)",
         borderColor: "var(--border)",

@@ -24,9 +24,12 @@ import {
   formatIdr,
   formatOrderDateTime,
   formatReturnBy,
+  paymentMethodLabel,
+  pickupTypeLabel,
   returnDueSummary,
 } from "@/lib/format";
 import { IS_DEMO } from "@/lib/demo";
+import { LocationSwitcher } from "@/components/operator/FleetModelStock";
 
 type Tab = "new" | "active" | "done";
 
@@ -47,6 +50,8 @@ function BookingsInner() {
   const bookings = useAppStore((s) => s.bookings);
   const vehicles = useAppStore((s) => s.vehicles);
   const sites = useAppStore((s) => s.sites);
+  const operatorActiveSiteId = useAppStore((s) => s.operatorActiveSiteId);
+  const setOperatorActiveSiteId = useAppStore((s) => s.setOperatorActiveSiteId);
   const confirmBooking = useAppStore((s) => s.confirmBooking);
   const declineBooking = useAppStore((s) => s.declineBooking);
   const confirmBulk = useAppStore((s) => s.confirmBulk);
@@ -62,29 +67,42 @@ function BookingsInner() {
     {},
   );
 
-  const mine = useMemo(
-    () => bookings.filter((b) => b.operatorId === user.operatorId),
-    [bookings, user.operatorId],
+  const opSites = useMemo(
+    () => sites.filter((s) => s.operatorId === user.operatorId),
+    [sites, user.operatorId],
   );
 
+  const mine = useMemo(() => {
+    const all = bookings.filter((b) => b.operatorId === user.operatorId);
+    if (!operatorActiveSiteId) return all;
+    return all.filter((b) => b.siteId === operatorActiveSiteId);
+  }, [bookings, user.operatorId, operatorActiveSiteId]);
+
   const list = useMemo(() => {
-    if (tab === "new") return mine.filter((b) => b.status === "pending");
-    if (tab === "active")
+    if (tab === "new")
       return mine.filter((b) =>
-        ["confirmed", "awaiting_pickup", "active", "overdue"].includes(b.status),
+        ["pending", "confirmed", "awaiting_pickup"].includes(b.status),
+      );
+    if (tab === "active")
+      return mine.filter(
+        (b) => b.status === "active" || b.status === "overdue",
       );
     return mine.filter((b) =>
       ["completed", "cancelled"].includes(b.status),
     );
   }, [mine, tab]);
 
-  const newCount = mine.filter((b) => b.status === "pending").length;
+  const newCount = mine.filter((b) =>
+    ["pending", "confirmed", "awaiting_pickup"].includes(b.status),
+  ).length;
   const availableCount = vehicles.filter(
     (v) =>
-      v.operatorId === user.operatorId && v.status === "available",
+      v.operatorId === user.operatorId &&
+      v.status === "available" &&
+      (!operatorActiveSiteId || v.siteId === operatorActiveSiteId),
   ).length;
-  const activeCount = mine.filter((b) =>
-    ["confirmed", "awaiting_pickup", "active", "overdue"].includes(b.status),
+  const activeCount = mine.filter(
+    (b) => b.status === "active" || b.status === "overdue",
   ).length;
   const keysOut = mine.filter(
     (b) =>
@@ -113,6 +131,31 @@ function BookingsInner() {
           ) : null
         }
       />
+
+      {opSites.length > 1 ? (
+        <div className="mt-2">
+          <LocationSwitcher
+            locations={opSites.map((s) => ({
+              id: s.id,
+              name: s.name.replace(/\s+(Lobby|Hub|Corner|Desk|Counter)$/i, ""),
+              total: bookings.filter(
+                (b) =>
+                  b.siteId === s.id &&
+                  ["pending", "confirmed", "awaiting_pickup", "active", "overdue"].includes(
+                    b.status,
+                  ),
+              ).length,
+            }))}
+            value={operatorActiveSiteId ?? "all"}
+            onChange={(id) =>
+              setOperatorActiveSiteId(id === "all" ? null : id)
+            }
+            unassignedCount={0}
+            showUnassigned={false}
+            showAll
+          />
+        </div>
+      ) : null}
 
       {keysOut > 0 ? (
         <div
@@ -181,24 +224,28 @@ function BookingsInner() {
         </div>
       ) : null}
 
-      {tab === "new" && list.length > 1 ? (
+      {tab === "new" && list.some((b) => b.status === "pending") ? (
         <button
           type="button"
           className="mx-4 mt-3 w-[calc(100%-32px)] rounded-xl py-3 text-sm font-bold text-white"
           style={{ background: "var(--ok)" }}
           onClick={() => {
+            const pendingIds = list
+              .filter((b) => b.status === "pending")
+              .map((b) => b.id);
             if (
               !window.confirm(
-                `Accept all ${list.length} new requests? Review appointment and availability first.`,
+                `Accept all ${pendingIds.length} new requests? Review appointment and availability first.`,
               )
             ) {
               return;
             }
-            confirmBulk(list.map((b) => b.id));
-            setToast(`Diterima ${list.length} pesanan`);
+            confirmBulk(pendingIds);
+            setToast(`Diterima ${pendingIds.length} pesanan`);
           }}
         >
-          Terima semua ({list.length})
+          Terima semua (
+          {list.filter((b) => b.status === "pending").length})
         </button>
       ) : null}
 
@@ -289,11 +336,52 @@ function BookingsInner() {
                 {plainStatus}
               </div>
               <div className="mt-1 text-base font-bold">{b.riderName}</div>
-              <div className="text-sm" style={{ color: "var(--text2)" }}>
+              {b.riderPhone ? (
+                <a
+                  className="text-sm font-semibold"
+                  style={{ color: "var(--primary)" }}
+                  href={`https://wa.me/${b.riderPhone.replace(/\D/g, "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  WA / tel {b.riderPhone}
+                </a>
+              ) : (
+                <div className="text-xs" style={{ color: "var(--text2)" }}>
+                  No phone on file
+                </div>
+              )}
+              <div
+                className="mt-2 grid grid-cols-2 gap-2 rounded-xl px-3 py-2.5 text-xs"
+                style={{ background: "var(--bg-deep)" }}
+              >
+                <div>
+                  <div style={{ color: "var(--text2)" }}>Pembayaran</div>
+                  <div className="font-bold">
+                    {paymentMethodLabel(b.paymentMethod)} ·{" "}
+                    {b.paymentStatus === "paid"
+                      ? "lunas"
+                      : b.paymentStatus === "refunded"
+                        ? "refund"
+                        : "belum"}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "var(--text2)" }}>Cara ambil</div>
+                  <div className="font-bold">
+                    {pickupTypeLabel(b.pickupType)}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <div style={{ color: "var(--text2)" }}>Durasi & total</div>
+                  <div className="font-bold">
+                    {b.durationLabel} ·{" "}
+                    {formatIdr(b.rentalPriceIdr + (b.addonsPriceIdr ?? 0))}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 text-sm" style={{ color: "var(--text2)" }}>
                 {v?.emoji} {v?.name} · {v?.code}
-                <br />
-                {b.durationLabel} ·{" "}
-                {formatIdr(b.rentalPriceIdr + (b.addonsPriceIdr ?? 0))}
                 <br />
                 {site ? (
                   <>
@@ -497,8 +585,7 @@ function BookingsInner() {
                     style={{ background: "var(--ok)" }}
                     onClick={() => {
                       confirmBooking(b.id);
-                      setToast("Diterima ✓");
-                      setTab("active");
+                      setToast("Diterima ✓ — siap serahkan kunci");
                     }}
                   >
                     <CircleCheck size={20} />

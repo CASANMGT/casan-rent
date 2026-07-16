@@ -107,7 +107,7 @@ export default function LoginPage() {
           Casan Rent
         </h1>
         <p className="mt-2 text-sm text-white/85">
-          Bikes · E-Bikes · E-Mopeds from multiple operators
+          Bikes · E-Bikes · E-Mopeds from hubs near you
         </p>
       </div>
 

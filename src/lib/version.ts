@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.7";
+export const APP_VERSION = "0.4.8";
 
 export interface ChangelogEntry {
   version: string;
@@ -9,6 +9,16 @@ export interface ChangelogEntry {
 
 /** Newest first — shown in What's New for riders and operators. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.4.8",
+    date: "2026-07-16",
+    title: "Hub-first search, advance booking & UX P0/P1",
+    highlights: [
+      "Discover by hub/location (not just operator); Book now or Book later with date & time",
+      "Leaner booking: main pickup hub, Book CTA, highlighted refundable deposit",
+      "Operator lokasi filter on Home & Orders; safer return key handoff; clearer lexicon",
+    ],
+  },
   {
     version: "0.4.7",
     date: "2026-07-16",

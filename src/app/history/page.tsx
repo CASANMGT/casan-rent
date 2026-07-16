@@ -38,7 +38,7 @@ function tripStatusLabel(status: string, paymentStatus: string) {
   }
   switch (status) {
     case "pending":
-      return "Waiting for shop";
+      return "Waiting for hub confirm";
     case "confirmed":
     case "awaiting_pickup":
       return "Ready to collect";
@@ -93,7 +93,7 @@ function HistoryInner() {
             className="mt-4 inline-block text-sm font-bold"
             style={{ color: "var(--primary)" }}
           >
-            Browse nearby bikes →
+            Find a hub →
           </Link>
         </div>
       ) : (

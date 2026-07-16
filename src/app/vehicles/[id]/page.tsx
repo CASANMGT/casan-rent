@@ -12,7 +12,13 @@ export default function VehicleRedirectPage() {
 
   useEffect(() => {
     const v = vehicles.find((x) => x.id === id);
-    if (v?.modelId) router.replace(`/models/${v.modelId}`);
+    if (v?.modelId) {
+      router.replace(
+        v.siteId
+          ? `/models/${v.modelId}?site=${v.siteId}`
+          : `/models/${v.modelId}`,
+      );
+    }
   }, [id, vehicles, router]);
 
   return (

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/Header";
+import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import { formatIdr, formatOrderDateTime } from "@/lib/format";
 import type { PaymentMethod } from "@/lib/types";
@@ -13,10 +14,18 @@ const methods: { id: PaymentMethod; name: string; desc: string }[] = [
   { id: "ovo", name: "OVO", desc: "E-wallet" },
   { id: "gopay", name: "GoPay", desc: "E-wallet" },
   { id: "shopeepay", name: "ShopeePay", desc: "E-wallet" },
-  { id: "pay_at_operator", name: "Pay at operator", desc: "Cash / counter QRIS" },
+  { id: "pay_at_operator", name: "Pay at hub", desc: "Cash / counter QRIS" },
 ];
 
 export default function BookPaymentPage() {
+  return (
+    <AuthGate role="rider">
+      <BookPaymentInner />
+    </AuthGate>
+  );
+}
+
+function BookPaymentInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const bookings = useAppStore((s) => s.bookings);
@@ -90,7 +99,15 @@ export default function BookPaymentPage() {
 
   return (
     <div className="content-pad">
-      <Header title="Payment" subtitle="Demo checkout" backHref={`/models/${booking.modelId}`} />
+      <Header
+        title="Payment"
+        subtitle="Demo checkout"
+        backHref={
+          booking.siteId
+            ? `/models/${booking.modelId}?site=${booking.siteId}`
+            : `/models/${booking.modelId}`
+        }
+      />
       <div className="card">
         <div className="font-bold">{vehicle.name}</div>
         <div className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
@@ -99,8 +116,8 @@ export default function BookPaymentPage() {
         <div className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
           Pickup:{" "}
           {booking.pickupType === "front_desk"
-            ? "Front Desk"
-            : "Self-Service"}
+            ? "Shop pickup"
+            : "Self-unlock at hub"}
           <br />
           Appointment: {formatOrderDateTime(booking.appointmentAt)}
         </div>

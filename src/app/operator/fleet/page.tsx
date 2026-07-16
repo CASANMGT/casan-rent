@@ -19,8 +19,18 @@ import { BottomNav } from "@/components/BottomNav";
 import { Header } from "@/components/Header";
 import { AuthGate } from "@/components/AuthGate";
 import { CityBadge, AreaBadge, OpSection } from "@/components/operator/OperatorUi";
+import {
+  LocationSwitcher,
+  ModelStockList,
+} from "@/components/operator/FleetModelStock";
+import { MockMap } from "@/components/MockMap";
 import { useAppStore } from "@/lib/store";
-import { formatIdrShort, vehicleTypeLabel } from "@/lib/format";
+import {
+  formatIdrShort,
+  osmBrowseUrl,
+  siteOpenClose,
+  vehicleTypeLabel,
+} from "@/lib/format";
 import { groupSitesByArea, uniqueAreas } from "@/lib/operator-ui";
 import type { RentalMode, VehicleStatus, VehicleType } from "@/lib/types";
 
@@ -37,11 +47,10 @@ function FleetInner() {
   const models = useAppStore((s) => s.models);
   const sites = useAppStore((s) => s.sites);
   const vehicles = useAppStore((s) => s.vehicles);
+  const bookings = useAppStore((s) => s.bookings);
   const pricing = useAppStore((s) => s.pricing);
   const updateVehicleStatus = useAppStore((s) => s.updateVehicleStatus);
   const addVehicle = useAppStore((s) => s.addVehicle);
-  const removeVehicle = useAppStore((s) => s.removeVehicle);
-  const adjustFleetStock = useAppStore((s) => s.adjustFleetStock);
   const addSite = useAppStore((s) => s.addSite);
   const updateSite = useAppStore((s) => s.updateSite);
   const removeSite = useAppStore((s) => s.removeSite);
@@ -61,10 +70,19 @@ function FleetInner() {
     () => vehicles.filter((v) => v.operatorId === opId),
     [vehicles, opId],
   );
+  const onRentBookings = useMemo(
+    () =>
+      bookings.filter(
+        (b) =>
+          b.operatorId === opId &&
+          (b.status === "active" || b.status === "overdue"),
+      ),
+    [bookings, opId],
+  );
 
   const [siteFilter, setSiteFilter] = useState<string>("all");
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<"all" | VehicleStatus | "free">("free");
+  const [filter, setFilter] = useState<"all" | VehicleStatus | "free">("all");
   const [panel, setPanel] = useState<"none" | "add" | "site" | "move">("none");
   const [moveToSite, setMoveToSite] = useState("");
 
@@ -75,6 +93,21 @@ function FleetInner() {
   const [pricePerHour, setPricePerHour] = useState(50000);
   const [addSiteId, setAddSiteId] = useState("");
   const [modelPick, setModelPick] = useState("");
+  const [stockQty, setStockQty] = useState(1);
+  const [stockColor, setStockColor] = useState("Black");
+  const [stockColorHex, setStockColorHex] = useState("#1C1C1E");
+  const [newModelOpen, setNewModelOpen] = useState(false);
+
+  const STOCK_COLORS = [
+    { color: "Black", colorHex: "#1C1C1E" },
+    { color: "White", colorHex: "#F2F2F7" },
+    { color: "Teal", colorHex: "#0D9488" },
+    { color: "Navy", colorHex: "#1E3A5F" },
+    { color: "Red", colorHex: "#C0392B" },
+    { color: "Silver", colorHex: "#A8B0B8" },
+    { color: "Forest", colorHex: "#1B5E3B" },
+    { color: "Sand", colorHex: "#C4A574" },
+  ];
 
   const [siteName, setSiteName] = useState("");
   const [siteAddress, setSiteAddress] = useState("");
@@ -102,13 +135,16 @@ function FleetInner() {
     () => [
       ...opSites.map((site) => {
         const units = fleet.filter((v) => v.siteId === site.id);
+        const onRent = onRentBookings.filter((b) => b.siteId === site.id).length;
         return {
           id: site.id,
           site,
           total: units.length,
           free: units.filter((v) => v.status === "available").length,
-          onRent: units.filter((v) => v.status === "rented").length,
-          attention: units.filter((v) => v.status === "maintenance").length,
+          onRent,
+          attention: units.filter(
+            (v) => v.status === "maintenance" || v.status === "disabled",
+          ).length,
           bicycles: units.filter((v) => v.vehicleType === "bicycle").length,
           ebikes: units.filter((v) => v.vehicleType === "ebike").length,
           emopeds: units.filter((v) => v.vehicleType === "emoped").length,
@@ -121,11 +157,14 @@ function FleetInner() {
         free: fleet.filter(
           (v) => isUnassigned(v.siteId) && v.status === "available",
         ).length,
-        onRent: fleet.filter(
-          (v) => isUnassigned(v.siteId) && v.status === "rented",
-        ).length,
+        onRent: onRentBookings.filter((b) => {
+          const v = fleet.find((x) => x.id === b.vehicleId);
+          return v ? isUnassigned(v.siteId) : false;
+        }).length,
         attention: fleet.filter(
-          (v) => isUnassigned(v.siteId) && v.status === "maintenance",
+          (v) =>
+            isUnassigned(v.siteId) &&
+            (v.status === "maintenance" || v.status === "disabled"),
         ).length,
         bicycles: fleet.filter(
           (v) => isUnassigned(v.siteId) && v.vehicleType === "bicycle",
@@ -138,7 +177,7 @@ function FleetInner() {
         ).length,
       },
     ],
-    [fleet, opSites, validSiteIds],
+    [fleet, opSites, validSiteIds, onRentBookings],
   );
 
   const activeSiteId = addSiteId || opSites[0]?.id || "";
@@ -174,41 +213,90 @@ function FleetInner() {
       });
   }, [fleet, siteFilter, validSiteIds, filter, q]);
 
-  function submitAdd() {
-    if (!opId || !activeSiteId) {
-      setToast("Create a place first");
-      return;
-    }
-    if (modelPick) {
-      const err = adjustFleetStock({
-        modelId: modelPick,
-        siteId: activeSiteId,
-        delta: 1,
-      });
-      if (err) setToast(err);
-      else setToast("Bike +1");
-      setPanel("none");
-      return;
-    }
-    if (!name.trim() || !code.trim()) {
-      setToast("Name and code required");
-      return;
-    }
-    addVehicle({
-      operatorId: opId,
-      siteId: activeSiteId,
-      name: name.trim(),
-      code: code.trim().toUpperCase(),
-      vehicleType,
-      rentalMode: vehicleType === "bicycle" ? "key_handover" : rentalMode,
-      pricePerHour,
-      batteryPct: vehicleType === "bicycle" ? null : 90,
-    });
-    setToast("Bike added");
-    setPanel("none");
+  function openAddStock() {
+    const siteId =
+      siteFilter !== "all" && siteFilter !== "unassigned"
+        ? siteFilter
+        : opSites[0]?.id || "";
+    setAddSiteId(siteId);
+    setModelPick(opModels[0]?.id ?? "");
+    setNewModelOpen(false);
+    setStockQty(1);
+    setStockColor("Black");
+    setStockColorHex("#1C1C1E");
     setName("");
     setCode("");
-    setModelPick("");
+    setPanel("add");
+  }
+
+  function submitAdd() {
+    if (!opId || !activeSiteId) {
+      setToast("Buat lokasi dulu");
+      return;
+    }
+    const qty = Math.max(1, Math.min(20, Math.floor(stockQty) || 1));
+
+    if (newModelOpen || !modelPick) {
+      if (!name.trim() || !code.trim()) {
+        setToast("Name and code required for new model");
+        return;
+      }
+      for (let i = 0; i < qty; i++) {
+        const suffix = qty > 1 ? `-${String(i + 1).padStart(2, "0")}` : "";
+        addVehicle({
+          operatorId: opId,
+          siteId: activeSiteId,
+          name: name.trim(),
+          code: `${code.trim().toUpperCase()}${suffix}`,
+          vehicleType,
+          rentalMode: vehicleType === "bicycle" ? "key_handover" : rentalMode,
+          pricePerHour,
+          batteryPct: vehicleType === "bicycle" ? null : 90,
+          color: stockColor,
+          colorHex: stockColorHex,
+        });
+      }
+      setToast(`Added ${qty} · ${name.trim()}`);
+      setPanel("none");
+      setName("");
+      setCode("");
+      setModelPick("");
+      setNewModelOpen(false);
+      setStockQty(1);
+      return;
+    }
+
+    const model = opModels.find((m) => m.id === modelPick);
+    if (!model) {
+      setToast("Pick a model");
+      return;
+    }
+    const existing = fleet.filter((v) => v.modelId === model.id).length;
+    for (let i = 0; i < qty; i++) {
+      const n = existing + i + 1;
+      const prefix = model.name
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 3);
+      addVehicle({
+        operatorId: opId,
+        siteId: activeSiteId,
+        modelId: model.id,
+        name: model.name,
+        code: `${prefix}-${String(n).padStart(2, "0")}`,
+        vehicleType: model.vehicleType,
+        rentalMode: model.rentalMode,
+        pricePerHour: model.pricePerHour,
+        batteryPct: model.vehicleType === "bicycle" ? null : 90,
+        color: stockColor,
+        colorHex: stockColorHex,
+      });
+    }
+    setToast(`+${qty} ${model.name}`);
+    setPanel("none");
+    setStockQty(1);
   }
 
   function clearSiteForm() {
@@ -360,10 +448,13 @@ function FleetInner() {
             <button
               type="button"
               className="flex items-center gap-1 text-xs font-bold text-white"
-              onClick={() => setPanel((p) => (p === "add" ? "none" : "add"))}
+              onClick={() => {
+                if (panel === "add") setPanel("none");
+                else openAddStock();
+              }}
             >
               <Plus size={14} />
-              {panel === "add" ? "Tutup" : "Tambah"}
+              {panel === "add" ? "Tutup" : "Stok"}
             </button>
           </div>
         }
@@ -389,120 +480,25 @@ function FleetInner() {
 
       <OpSection
         icon={Warehouse}
-        title="Sepeda per lokasi"
-        hint="Tap a location to see and manage its bikes"
+        title="Lokasi"
+        hint="Ganti lokasi · stok per model"
       />
-      <div className="mx-4 grid grid-cols-1 gap-2">
-        {locationSummaries.map((row) => {
-          const selected = siteFilter === row.id;
-          const unassigned = row.id === "unassigned";
-          return (
-            <button
-              key={row.id}
-              type="button"
-              className="rounded-2xl border p-3.5 text-left transition active:scale-[0.99]"
-              style={{
-                background: unassigned
-                  ? row.total > 0
-                    ? "#FEF5E7"
-                    : "var(--card)"
-                  : "var(--card)",
-                borderColor: selected
-                  ? "var(--primary)"
-                  : unassigned && row.total > 0
-                    ? "var(--warn)"
-                    : "var(--border)",
-                borderWidth: selected ? 2 : 1,
-              }}
-              onClick={() => {
-                setSiteFilter((current) =>
-                  current === row.id ? "all" : row.id,
-                );
-                setFilter("all");
-                if (row.site) setAddSiteId(row.site.id);
-              }}
-            >
-              <div className="flex items-start gap-3">
-                <span
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
-                  style={{
-                    background: unassigned
-                      ? "#FDEBD0"
-                      : "color-mix(in srgb, var(--primary) 10%, white)",
-                    color: unassigned ? "var(--warn)" : "var(--primary)",
-                  }}
-                >
-                  {unassigned ? (
-                    <CircleAlert size={20} />
-                  ) : (
-                    <MapPin size={20} />
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-bold text-sm">
-                        {row.site?.name ?? "Belum ada lokasi · Unassigned"}
-                      </div>
-                      <div
-                        className="text-xs"
-                        style={{ color: "var(--text2)" }}
-                      >
-                        {row.site
-                          ? `${row.site.area} · ${row.site.city}`
-                          : row.total > 0
-                            ? "Assign these bikes before renting"
-                            : "All bikes have a location"}
-                      </div>
-                      {row.site ? (
-                        <div
-                          className="mt-0.5 line-clamp-1 text-[10px]"
-                          style={{ color: "var(--text2)" }}
-                        >
-                          {row.site.address} · {row.site.hours}
-                        </div>
-                      ) : null}
-                    </div>
-                    <span className="text-2xl font-bold tabular-nums">
-                      {row.total}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex gap-3 text-[11px] font-semibold">
-                    <span style={{ color: "var(--ok)" }}>
-                      {row.free} siap
-                    </span>
-                    <span style={{ color: "var(--primary)" }}>
-                      {row.onRent} dipinjam
-                    </span>
-                    {row.attention > 0 ? (
-                      <span style={{ color: "var(--danger)" }}>
-                        {row.attention} rusak
-                      </span>
-                    ) : null}
-                  </div>
-                  <div
-                    className="mt-1.5 text-[10px]"
-                    style={{ color: "var(--text2)" }}
-                  >
-                    {row.bicycles} bicycle · {row.ebikes} e-bike ·{" "}
-                    {row.emopeds} e-moped
-                  </div>
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-      {siteFilter !== "all" ? (
-        <button
-          type="button"
-          className="mx-4 mt-2 text-xs font-bold"
-          style={{ color: "var(--primary)" }}
-          onClick={() => setSiteFilter("all")}
-        >
-          Lihat semua lokasi
-        </button>
-      ) : null}
+      <LocationSwitcher
+        locations={opSites.map((s) => ({
+          id: s.id,
+          name: s.name.replace(/ Lobby| Hub| Corner/g, "").trim() || s.name,
+          total: locationSummaries.find((r) => r.id === s.id)?.total ?? 0,
+        }))}
+        value={siteFilter === "all" ? opSites[0]?.id ?? "all" : siteFilter}
+        unassignedCount={
+          locationSummaries.find((r) => r.id === "unassigned")?.total ?? 0
+        }
+        onChange={(id) => {
+          setSiteFilter(id);
+          setFilter("all");
+          if (id !== "unassigned") setAddSiteId(id);
+        }}
+      />
 
       {siteFilter !== "all" ? (
         <div className="card !py-3">
@@ -547,24 +543,29 @@ function FleetInner() {
                     >
                       {s.address}
                     </div>
-                    <div
-                      className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"
-                      style={{ color: "var(--text2)" }}
-                    >
-                      <span className="inline-flex items-center gap-1">
-                        <Clock size={12} /> {s.hours}
-                      </span>
-                      <a
-                        className="inline-flex items-center gap-1 font-semibold"
-                        style={{ color: "var(--ok)" }}
-                        href={`https://wa.me/${(s.whatsapp || op?.phone || "").replace(/\D/g, "")}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <MessageCircle size={12} />
-                        WA {s.whatsapp || op?.phone || "not set"}
-                      </a>
-                    </div>
+                    {(() => {
+                      const oc = siteOpenClose(s);
+                      return (
+                        <div
+                          className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"
+                          style={{ color: "var(--text2)" }}
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            <Clock size={12} /> Buka {oc.open} · Tutup {oc.close}
+                          </span>
+                          <a
+                            className="inline-flex items-center gap-1 font-semibold"
+                            style={{ color: "var(--ok)" }}
+                            href={`https://wa.me/${(s.whatsapp || op?.phone || "").replace(/\D/g, "")}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <MessageCircle size={12} />
+                            {s.whatsapp || op?.phone || "WA not set"}
+                          </a>
+                        </div>
+                      );
+                    })()}
                     {s.storeInfo ? (
                       <p
                         className="mt-2 rounded-lg px-2.5 py-2 text-xs"
@@ -589,6 +590,31 @@ function FleetInner() {
                     </div>
                   </div>
                 </div>
+                <div className="mt-3 overflow-hidden rounded-xl">
+                  <MockMap
+                    height={140}
+                    mapImage={s.mapImage || op?.mapImage}
+                    label={`OpenStreetMap · ${s.name}`}
+                    pins={[
+                      {
+                        id: s.id,
+                        label: s.name,
+                        top: "48%",
+                        left: "55%",
+                      },
+                    ]}
+                  />
+                </div>
+                <a
+                  className="mt-2 block rounded-xl px-3 py-2 text-center text-xs font-bold"
+                  style={{ background: "var(--bg-deep)", color: "var(--primary)" }}
+                  href={osmBrowseUrl(s.lat, s.lng)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <MapPin size={12} className="mr-1 inline" />
+                  Buka peta · {s.lat.toFixed(4)}, {s.lng.toFixed(4)}
+                </a>
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   <LocationStat
                     value={summary?.free ?? 0}
@@ -602,7 +628,7 @@ function FleetInner() {
                   />
                   <LocationStat
                     value={summary?.attention ?? 0}
-                    label="Rusak"
+                    label="Down"
                     color="var(--danger)"
                   />
                 </div>
@@ -668,7 +694,7 @@ function FleetInner() {
             style={{ background: "var(--bg-deep)", color: "var(--primary)" }}
             onClick={() => setPanel((p) => (p === "move" ? "none" : "move"))}
           >
-            Move free bikes between places
+            Pindahkan sepeda free antar lokasi
           </button>
         </div>
       )}
@@ -822,85 +848,24 @@ function FleetInner() {
               className="btn-primary !mx-0 !mt-0 !w-full"
               onClick={submitSite}
             >
-              {editingSiteId ? "Save changes" : "Add location"}
+              {editingSiteId ? "Simpan" : "Tambah lokasi"}
             </button>
           </div>
         </div>
       ) : null}
 
-      {/* Stock +/- when a place is selected */}
       {siteFilter !== "all" && siteFilter !== "unassigned" ? (
-        <>
-          <OpSection
-            icon={Plus}
-            title="Tambah stok semua model"
-            hint="Every fleet model can be added to this location"
-          />
-          {opModels.map((m) => {
-            const units = fleet.filter(
-              (v) => v.modelId === m.id && v.siteId === siteFilter,
-            );
-            const available = units.filter((v) => v.status === "available").length;
-            return (
-              <div
-                key={m.id}
-                className="mx-4 mb-2 flex items-center gap-3 rounded-xl px-3 py-3"
-                style={{ background: "var(--card)" }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={m.images[0]}
-                  alt=""
-                  className="h-12 w-14 rounded-lg object-cover"
-                />
-                <div className="flex-1">
-                  <div className="text-sm font-bold">{m.name}</div>
-                  <div className="text-xs" style={{ color: "var(--text2)" }}>
-                    {vehicleTypeLabel(m.vehicleType)} · {available}/{units.length} free
-                    {m.vehicleType === "bicycle" ? " · key only" : ""}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  aria-label={`Remove one ${m.name}`}
-                  className="flex h-9 w-9 items-center justify-center rounded-full text-lg font-bold"
-                  style={{ background: "#FADBD8", color: "var(--danger)" }}
-                  onClick={() => {
-                    if (!window.confirm(`Remove one available ${m.name}?`)) {
-                      return;
-                    }
-                    const err = adjustFleetStock({
-                      modelId: m.id,
-                      siteId: siteFilter,
-                      delta: -1,
-                    });
-                    if (err) setToast(err);
-                    else setToast("−1");
-                  }}
-                >
-                  −
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Add one ${m.name}`}
-                  className="flex h-9 w-9 items-center justify-center rounded-full text-lg font-bold text-white"
-                  style={{ background: "var(--ok)" }}
-                  onClick={() => {
-                    const err = adjustFleetStock({
-                      modelId: m.id,
-                      siteId: siteFilter,
-                      delta: 1,
-                    });
-                    if (err) setToast(err);
-                    else setToast("+1");
-                  }}
-                >
-                  +
-                </button>
-              </div>
-            );
-          })}
-        </>
+        <div className="mx-4 mt-3">
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold text-white"
+            style={{ background: "var(--ok)" }}
+            onClick={openAddStock}
+          >
+            <Plus size={18} />
+            Tambah stok ke lokasi ini
+          </button>
+        </div>
       ) : null}
 
       {siteFilter !== "all" ? (
@@ -921,10 +886,11 @@ function FleetInner() {
             {(
               [
                 ["all", "All"],
-                ["free", "Free ✓"],
+                ["free", "Ready"],
                 ["rented", "On rent"],
                 ["reserved", "Waiting"],
-                ["maintenance", "Broken"],
+                ["disabled", "Disabled"],
+                ["maintenance", "Maintenance"],
               ] as const
             ).map(([f, label]) => (
               <button
@@ -952,241 +918,300 @@ function FleetInner() {
       ) : null}
 
       {panel === "add" ? (
-        <div className="card space-y-2">
-          <div className="font-bold text-sm">Add bike</div>
-          <select
-            className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-            style={{ borderColor: "var(--border)" }}
-            value={activeSiteId}
-            onChange={(e) => setAddSiteId(e.target.value)}
+        <>
+          <div
+            className="fixed inset-0 z-[179] bg-black/40"
+            onClick={() => setPanel("none")}
+          />
+          <div
+            className="fixed bottom-0 left-1/2 z-[180] flex max-h-[88vh] w-full max-w-[430px] -translate-x-1/2 flex-col rounded-t-3xl pb-[max(1rem,env(safe-area-inset-bottom))]"
+            style={{ background: "var(--card)" }}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add stock"
           >
-            {opSites.map((s) => (
-              <option key={s.id} value={s.id}>
-                Place: {s.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-            style={{ borderColor: "var(--border)" }}
-            value={modelPick}
-            onChange={(e) => setModelPick(e.target.value)}
-          >
-            <option value="">New model…</option>
-            {opModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                +1 {m.name}
-              </option>
-            ))}
-          </select>
-          {!modelPick ? (
-            <>
-              <input
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                style={{ borderColor: "var(--border)" }}
-                placeholder="Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <input
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                style={{ borderColor: "var(--border)" }}
-                placeholder="Code e.g. MG-E09"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-              />
-              <select
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                style={{ borderColor: "var(--border)" }}
-                value={vehicleType}
-                onChange={(e) => {
-                  const t = e.target.value as VehicleType;
-                  setVehicleType(t);
-                  if (t === "bicycle") setRentalMode("key_handover");
-                }}
+            <div className="flex items-center justify-between border-b px-5 py-4" style={{ borderColor: "var(--border)" }}>
+              <div>
+                <div className="font-display text-lg font-semibold">Add stock</div>
+                <p className="text-xs" style={{ color: "var(--text2)" }}>
+                  Add bikes to a location · choose model or create new
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-full px-3 py-1.5 text-xs font-bold"
+                style={{ background: "var(--bg-deep)", color: "var(--text2)" }}
+                onClick={() => setPanel("none")}
               >
-                <option value="bicycle">Bicycle (no battery · physical key)</option>
-                <option value="ebike">E-Bike</option>
-                <option value="emoped">E-Moped</option>
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3 overflow-y-auto px-5 py-4">
+              <label className="block text-xs font-bold" style={{ color: "var(--text2)" }}>
+                Location
+              </label>
+              <select
+                className="w-full rounded-xl border px-3 py-3 text-sm outline-none"
+                style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+                value={activeSiteId}
+                onChange={(e) => setAddSiteId(e.target.value)}
+              >
+                {opSites.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
               </select>
-              {vehicleType !== "bicycle" ? (
-                <select
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                  style={{ borderColor: "var(--border)" }}
-                  value={rentalMode}
-                  onChange={(e) => setRentalMode(e.target.value as RentalMode)}
+
+              <label className="block text-xs font-bold" style={{ color: "var(--text2)" }}>
+                Model
+              </label>
+              <div className="space-y-2">
+                {opModels.map((m) => {
+                  const selected = !newModelOpen && modelPick === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-xl border p-2.5 text-left"
+                      style={{
+                        borderColor: selected ? "var(--primary)" : "var(--border)",
+                        background: selected
+                          ? "color-mix(in srgb, var(--primary) 10%, white)"
+                          : "var(--bg)",
+                      }}
+                      onClick={() => {
+                        setModelPick(m.id);
+                        setNewModelOpen(false);
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={m.images[0]}
+                        alt=""
+                        className="h-12 w-12 rounded-lg object-cover"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-bold">{m.name}</div>
+                        <div className="text-[11px]" style={{ color: "var(--text2)" }}>
+                          {vehicleTypeLabel(m.vehicleType)} ·{" "}
+                          {fleet.filter((v) => v.modelId === m.id && v.siteId === activeSiteId).length}{" "}
+                          here
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-xl border px-3 py-3 text-sm font-bold"
+                style={{
+                  borderColor: newModelOpen ? "var(--primary)" : "var(--border)",
+                  background: newModelOpen
+                    ? "color-mix(in srgb, var(--primary) 8%, white)"
+                    : "var(--bg)",
+                  color: "var(--primary)",
+                }}
+                onClick={() => {
+                  setNewModelOpen((v) => !v);
+                  if (!newModelOpen) setModelPick("");
+                }}
+                aria-expanded={newModelOpen}
+              >
+                <span>+ New model (not in catalog yet)</span>
+                <span style={{ color: "var(--text2)" }}>
+                  {newModelOpen ? "Hide" : "Expand"}
+                </span>
+              </button>
+
+              {newModelOpen ? (
+                <div
+                  className="space-y-2 rounded-xl border p-3"
+                  style={{ borderColor: "var(--border)", background: "var(--bg-deep)" }}
                 >
-                  <option value="digital">App key</option>
-                  <option value="key_handover">Physical key</option>
-                  <option value="both">App + physical key</option>
-                </select>
+                  <input
+                    className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+                    style={{ borderColor: "var(--border)", background: "var(--card)" }}
+                    placeholder="Model name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                  <input
+                    className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+                    style={{ borderColor: "var(--border)", background: "var(--card)" }}
+                    placeholder="Code prefix e.g. NX"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                  />
+                  <select
+                    className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+                    style={{ borderColor: "var(--border)", background: "var(--card)" }}
+                    value={vehicleType}
+                    onChange={(e) => {
+                      const t = e.target.value as VehicleType;
+                      setVehicleType(t);
+                      if (t === "bicycle") setRentalMode("key_handover");
+                    }}
+                  >
+                    <option value="bicycle">Bicycle · physical key</option>
+                    <option value="ebike">E-Bike</option>
+                    <option value="emoped">E-Moped</option>
+                  </select>
+                  {vehicleType !== "bicycle" ? (
+                    <select
+                      className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+                      style={{ borderColor: "var(--border)", background: "var(--card)" }}
+                      value={rentalMode}
+                      onChange={(e) => setRentalMode(e.target.value as RentalMode)}
+                    >
+                      <option value="digital">App key</option>
+                      <option value="key_handover">Physical key</option>
+                      <option value="both">App + physical key</option>
+                    </select>
+                  ) : null}
+                  <input
+                    type="number"
+                    className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+                    style={{ borderColor: "var(--border)", background: "var(--card)" }}
+                    placeholder="Price per hour"
+                    value={pricePerHour}
+                    onChange={(e) => setPricePerHour(Number(e.target.value) || 0)}
+                  />
+                </div>
               ) : null}
-              <input
-                type="number"
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
-                style={{ borderColor: "var(--border)" }}
-                placeholder="Price per hour"
-                value={pricePerHour}
-                onChange={(e) => setPricePerHour(Number(e.target.value) || 0)}
-              />
-            </>
-          ) : null}
-          <button type="button" className="btn-primary !mx-0 !w-full" onClick={submitAdd}>
-            Save bike
-          </button>
-        </div>
+
+              <label className="block text-xs font-bold" style={{ color: "var(--text2)" }}>
+                Color
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {STOCK_COLORS.map((c) => (
+                  <button
+                    key={c.color}
+                    type="button"
+                    className="flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-bold"
+                    style={{
+                      borderColor:
+                        stockColor === c.color ? "var(--primary)" : "var(--border)",
+                      background:
+                        stockColor === c.color
+                          ? "color-mix(in srgb, var(--primary) 10%, white)"
+                          : "var(--bg)",
+                    }}
+                    onClick={() => {
+                      setStockColor(c.color);
+                      setStockColorHex(c.colorHex);
+                    }}
+                  >
+                    <span
+                      className="h-3.5 w-3.5 rounded-full border border-black/10"
+                      style={{ background: c.colorHex }}
+                    />
+                    {c.color}
+                  </button>
+                ))}
+              </div>
+
+              <label className="block text-xs font-bold" style={{ color: "var(--text2)" }}>
+                Quantity
+              </label>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold"
+                  style={{ background: "var(--bg-deep)" }}
+                  onClick={() => setStockQty((n) => Math.max(1, n - 1))}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  className="w-16 rounded-xl border py-2 text-center text-base font-bold outline-none"
+                  style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+                  value={stockQty}
+                  onChange={(e) =>
+                    setStockQty(Math.max(1, Math.min(20, Number(e.target.value) || 1)))
+                  }
+                />
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-lg font-bold text-white"
+                  style={{ background: "var(--ok)" }}
+                  onClick={() => setStockQty((n) => Math.min(20, n + 1))}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div className="border-t px-5 pt-3" style={{ borderColor: "var(--border)" }}>
+              <button
+                type="button"
+                className="btn-primary !mx-0 !mt-0 !w-full"
+                onClick={submitAdd}
+              >
+                Add {stockQty} bike{stockQty > 1 ? "s" : ""}
+              </button>
+            </div>
+          </div>
+        </>
       ) : null}
 
       {siteFilter !== "all" ? (
         <>
-      <p className="section-label">
-        {siteFilter === "unassigned"
-          ? "Unassigned bikes"
-          : siteFilter !== "all"
-            ? `Bikes at ${opSites.find((s) => s.id === siteFilter)?.name ?? "location"}`
-            : filter === "free"
-              ? "Free bikes (highlighted)"
-              : "All bikes"}
-      </p>
-      {list.length === 0 ? (
-        <p className="p-8 text-center text-sm" style={{ color: "var(--text2)" }}>
-          No bikes match. Try All places or All types.
-        </p>
-      ) : (
-        list.map((v) => {
-          const site = sites.find((s) => s.id === v.siteId);
-          const isFree = v.status === "available";
-          const statusLabel =
-            v.status === "available"
-              ? "FREE"
-              : v.status === "rented"
-                ? "On rent"
-                : v.status === "reserved"
-                  ? "Waiting"
-                  : v.status === "maintenance"
-                    ? "Broken"
-                    : "Charging";
-          return (
-            <div
-              key={v.id}
-              className="card"
-              style={{
-                border: isFree ? "2px solid var(--ok)" : undefined,
-                boxShadow: isFree
-                  ? "0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent)"
-                  : undefined,
-                background: isFree
-                  ? "color-mix(in srgb, var(--ok) 6%, white)"
-                  : "var(--card)",
-              }}
-            >
-              <div className="flex justify-between gap-2">
-                <div>
-                  <div className="font-bold">
-                    {v.emoji} {v.name}
-                  </div>
-                  <div className="text-xs" style={{ color: "var(--text2)" }}>
-                    {v.code} · {vehicleTypeLabel(v.vehicleType)}
-                    {v.vehicleType === "bicycle"
-                      ? " · No battery · Physical key"
-                      : v.batteryPct != null
-                        ? ` · Battery ${v.batteryPct}%`
-                        : " · Charge TBD"}
-                    <br />
-                    <MapPin size={11} className="inline" />{" "}
-                    {site ? `${site.area} · ${site.name}` : "Belum ada tempat"}
-                  </div>
-                </div>
-                <span
-                  className="h-fit rounded-full px-2.5 py-1 text-[11px] font-bold"
-                  style={{
-                    background: isFree ? "var(--ok)" : "var(--bg-deep)",
-                    color: isFree ? "white" : "var(--text2)",
-                  }}
-                >
-                  {statusLabel}
-                </span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <select
-                  className="rounded-lg px-2 py-2 text-xs font-bold outline-none"
-                  style={{ background: "var(--bg-deep)" }}
-                  value={site ? v.siteId : ""}
-                  onChange={(e) => {
-                    const destination = opSites.find(
-                      (candidate) => candidate.id === e.target.value,
-                    );
-                    if (
-                      !window.confirm(
-                        e.target.value
-                          ? `Move ${v.code} to ${destination?.name ?? "this location"}?`
-                          : `Mark ${v.code} as Unassigned?`,
-                      )
-                    ) {
-                      return;
-                    }
-                    moveVehicleSite(v.id, e.target.value);
-                    setToast(
-                      e.target.value
-                        ? "Moved to new place"
-                        : "Bike marked unassigned",
-                    );
-                  }}
-                >
-                  <option value="">Belum ada lokasi · Unassigned</option>
-                  {opSites.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      Move → {s.name}
-                    </option>
-                  ))}
-                </select>
-                {!isFree && v.status !== "rented" ? (
-                  <button
-                    type="button"
-                    className="rounded-lg px-3 py-2 text-xs font-bold text-white"
-                    style={{ background: "var(--ok)" }}
-                    onClick={() => {
-                      updateVehicleStatus(v.id, "available");
-                      setToast("Marked FREE");
-                    }}
-                  >
-                    Mark FREE
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="rounded-lg px-3 py-2 text-xs font-bold"
-                  style={{ background: "#FEF5E7", color: "var(--warn)" }}
-                  onClick={() => {
-                    updateVehicleStatus(v.id, "maintenance");
-                    setToast("Marked Broken");
-                  }}
-                >
-                  Broken
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg px-3 py-2 text-xs font-bold"
-                  style={{ background: "#FADBD8", color: "var(--danger)" }}
-                  onClick={() => {
-                    if (v.status === "rented" || v.status === "reserved") {
-                      setToast("Finish rental first");
-                      return;
-                    }
-                    if (!window.confirm(`Remove bike ${v.code} from the fleet?`)) {
-                      return;
-                    }
-                    removeVehicle(v.id);
-                    setToast("Removed");
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          );
-        })
-      )}
+          <p className="section-label">
+            {siteFilter === "unassigned"
+              ? "Models · unassigned"
+              : `Models at ${opSites.find((s) => s.id === siteFilter)?.name ?? "location"}`}
+          </p>
+          <ModelStockList
+            models={opModels}
+            units={list}
+            site={
+              siteFilter === "unassigned"
+                ? null
+                : opSites.find((s) => s.id === siteFilter) ?? null
+            }
+            moveSites={opSites}
+            onStatus={(id, status) => {
+              if (
+                (status === "available" || status === "disabled") &&
+                list.find((v) => v.id === id)?.status === "rented"
+              ) {
+                setToast("Finish rental first");
+                return;
+              }
+              updateVehicleStatus(id, status);
+              setToast(
+                status === "available"
+                  ? "Marked Ready"
+                  : status === "disabled"
+                    ? "Marked Disabled"
+                    : status === "maintenance"
+                      ? "Marked Maintenance"
+                      : "Status updated",
+              );
+            }}
+            onMove={(id, dest) => {
+              const bike = list.find((v) => v.id === id);
+              const destination = opSites.find((s) => s.id === dest);
+              if (
+                !window.confirm(
+                  dest
+                    ? `Move ${bike?.code ?? "bike"} to ${destination?.name ?? "location"}?`
+                    : `Mark ${bike?.code ?? "bike"} as Unassigned?`,
+                )
+              ) {
+                return;
+              }
+              moveVehicleSite(id, dest);
+              setToast(dest ? "Moved" : "Unassigned");
+            }}
+          />
         </>
       ) : (
         <div
@@ -1198,10 +1223,9 @@ function FleetInner() {
             className="mx-auto"
             style={{ color: "var(--primary)" }}
           />
-          <div className="mt-2 font-bold">Belum ada lokasi dipilih</div>
+          <div className="mt-2 font-bold">Pilih lokasi di atas</div>
           <p className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
-            Tap kartu lokasi di atas untuk melihat stok model, jam buka, WhatsApp,
-            dan daftar sepeda.
+            Pilih lokasi untuk lihat stok model, foto, kunci, dan status sepeda.
           </p>
         </div>
       )}

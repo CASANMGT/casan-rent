@@ -35,10 +35,52 @@ import type {
   VehicleType,
   RentalMode,
 } from "./types";
-import { bookingCode, formatIdr, formatReturnBy } from "./format";
+import { bookingCode, formatIdr, formatReturnBy, siteOpenClose } from "./format";
 import { IS_DEMO } from "./demo";
 import { APP_VERSION } from "./version";
 import { pickAssignableUnit } from "./catalog";
+
+function siteHoursParts(hours: string) {
+  return siteOpenClose({ hours });
+}
+
+/** Keep vehicle.status aligned with live bookings (fixes Out vs rider active desync). */
+export function syncVehicleStatusesFromBookings(
+  vehicles: Vehicle[],
+  bookings: Booking[],
+): Vehicle[] {
+  const live = new Map<string, Booking["status"]>();
+  const rank: Record<string, number> = {
+    overdue: 5,
+    active: 4,
+    awaiting_pickup: 3,
+    confirmed: 3,
+    pending: 2,
+  };
+  for (const b of bookings) {
+    if (b.status === "completed" || b.status === "cancelled") continue;
+    const prev = live.get(b.vehicleId);
+    if (!prev || (rank[b.status] ?? 0) >= (rank[prev] ?? 0)) {
+      live.set(b.vehicleId, b.status);
+    }
+  }
+  return vehicles.map((v) => {
+    if (v.status === "maintenance" || v.status === "disabled") return v;
+    const st = live.get(v.id);
+    if (!st) {
+      if (v.status === "rented" || v.status === "reserved") {
+        return { ...v, status: "available" as VehicleStatus };
+      }
+      return v;
+    }
+    if (st === "active" || st === "overdue") {
+      return v.status === "rented" ? v : { ...v, status: "rented" as VehicleStatus };
+    }
+    return v.status === "reserved"
+      ? v
+      : { ...v, status: "reserved" as VehicleStatus };
+  });
+}
 
 interface AppState {
   hydrated: boolean;
@@ -58,11 +100,18 @@ interface AppState {
   darkMode: boolean;
   weekendSurcharge: Record<string, boolean>;
   lastSeenVersion: string | null;
+  /** Operator console: null = all lokasi. */
+  operatorActiveSiteId: string | null;
   setHydrated: (v: boolean) => void;
   setToast: (msg: string | null) => void;
   toggleDarkMode: () => void;
   markVersionSeen: () => void;
-  pushNotification: (title: string, body: string) => void;
+  setOperatorActiveSiteId: (siteId: string | null) => void;
+  pushNotification: (
+    title: string,
+    body: string,
+    opts?: { href?: string; bookingId?: string },
+  ) => void;
   loginRider: (name: string, phone?: string, isGuest?: boolean) => void;
   loginOperator: (username: string, password: string) => string | null;
   logout: () => void;
@@ -136,6 +185,8 @@ interface AppState {
     rentalMode: RentalMode;
     pricePerHour: number;
     batteryPct: number | null;
+    color?: string;
+    colorHex?: string;
   }) => Vehicle;
   /** Add (+1) or remove (−1 available) unit for a model at a site. */
   adjustFleetStock: (input: {
@@ -148,6 +199,7 @@ interface AppState {
   updatePricing: (operatorId: string, tiers: PricingTier[]) => void;
   setWeekendSurcharge: (operatorId: string, on: boolean) => void;
   markNotificationsRead: () => void;
+  markNotificationRead: (id: string) => void;
   /** Demo: fake a customer booking request waiting for Accept. */
   simulateRiderRequest: () => Booking | null;
   resetDemo: () => void;
@@ -159,9 +211,11 @@ function notifyConfirm(booking: Booking): AppNotification {
   return {
     id: `n-confirm-${booking.id}-${Date.now()}`,
     title: "Booking confirmed",
-    body: `${booking.code} is ready for pickup. Head to the station when you're ready.`,
+    body: `${booking.code} is ready for pickup. Head to the hub when you're ready.`,
     read: false,
     createdAt: new Date().toISOString(),
+    bookingId: booking.id,
+    href: `/book/${booking.id}/confirmed`,
   };
 }
 
@@ -188,6 +242,7 @@ export const useAppStore = create<AppState>()(
       toast: null,
       darkMode: false,
       lastSeenVersion: null,
+      operatorActiveSiteId: null,
       weekendSurcharge: {
         "op-margonda": true,
         "op-tebet": true,
@@ -201,8 +256,10 @@ export const useAppStore = create<AppState>()(
       setToast: (msg) => set({ toast: msg }),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
       markVersionSeen: () => set({ lastSeenVersion: APP_VERSION }),
+      setOperatorActiveSiteId: (siteId) =>
+        set({ operatorActiveSiteId: siteId }),
 
-      pushNotification: (title, body) =>
+      pushNotification: (title, body, opts) =>
         set((s) => ({
           notifications: [
             {
@@ -211,6 +268,8 @@ export const useAppStore = create<AppState>()(
               body,
               read: false,
               createdAt: new Date().toISOString(),
+              href: opts?.href,
+              bookingId: opts?.bookingId,
             },
             ...s.notifications,
           ],
@@ -242,7 +301,7 @@ export const useAppStore = create<AppState>()(
         return null;
       },
 
-      logout: () => set({ user: emptyUser }),
+      logout: () => set({ user: emptyUser, operatorActiveSiteId: null }),
 
       toggleFavorite: (id) =>
         set((s) => ({
@@ -320,6 +379,7 @@ export const useAppStore = create<AppState>()(
           modelId,
           siteId: vehicle.siteId,
           riderName: user.name || "Guest",
+          riderPhone: user.phone || undefined,
           status: needsConfirm ? "pending" : "confirmed",
           pickupType,
           rentalMode,
@@ -708,15 +768,20 @@ export const useAppStore = create<AppState>()(
         }),
 
       updateVehicleStatus: (vehicleId, status) =>
-        set((s) => ({
-          vehicles: s.vehicles.map((v) =>
+        set((s) => {
+          const vehicles = s.vehicles.map((v) =>
             v.id === vehicleId ? { ...v, status } : v,
-          ),
-        })),
+          );
+          return {
+            vehicles: syncVehicleStatusesFromBookings(vehicles, s.bookings),
+          };
+        }),
 
       addSite: (input) => {
         if (!input.name.trim()) return null;
         const op = get().operators.find((o) => o.id === input.operatorId);
+        const hours = input.hours?.trim() || "07:00 - 20:00";
+        const oc = siteHoursParts(hours);
         const site: OperatorSite = {
           id: `site-${Date.now()}`,
           operatorId: input.operatorId,
@@ -726,7 +791,9 @@ export const useAppStore = create<AppState>()(
           address: input.address.trim() || input.name.trim(),
           lat: input.lat ?? op?.lat ?? 0,
           lng: input.lng ?? op?.lng ?? 0,
-          hours: input.hours?.trim() || "07:00 - 20:00",
+          hours,
+          opensAt: oc.open,
+          closesAt: oc.close,
           whatsapp: input.whatsapp?.trim() || op?.phone || "",
           storeInfo: input.storeInfo?.trim() || "",
           supportsFrontDesk: input.supportsFrontDesk,
@@ -746,6 +813,8 @@ export const useAppStore = create<AppState>()(
         if (!input.name.trim()) return "Place name required";
         const site = get().sites.find((x) => x.id === siteId);
         if (!site) return "Place not found";
+        const hours = input.hours.trim() || site.hours;
+        const oc = siteHoursParts(hours);
         set((s) => ({
           sites: s.sites.map((x) =>
             x.id === siteId
@@ -757,7 +826,9 @@ export const useAppStore = create<AppState>()(
                   area: input.area.trim() || input.name.trim(),
                   lat: input.lat,
                   lng: input.lng,
-                  hours: input.hours.trim() || x.hours,
+                  hours,
+                  opensAt: oc.open,
+                  closesAt: oc.close,
                   whatsapp: input.whatsapp.trim(),
                   storeInfo: input.storeInfo.trim(),
                   supportsFrontDesk: input.supportsFrontDesk,
@@ -898,6 +969,8 @@ export const useAppStore = create<AppState>()(
           lng: site?.lng ?? op?.lng ?? 0,
           emoji: model.emoji,
           requiresSimAck: model.requiresSimAck,
+          color: input.color ?? "Black",
+          colorHex: input.colorHex ?? "#1C1C1E",
         };
         set((s) => ({
           models,
@@ -987,6 +1060,13 @@ export const useAppStore = create<AppState>()(
           notifications: s.notifications.map((n) => ({ ...n, read: true })),
         })),
 
+      markNotificationRead: (id) =>
+        set((s) => ({
+          notifications: s.notifications.map((n) =>
+            n.id === id ? { ...n, read: true } : n,
+          ),
+        })),
+
       simulateRiderRequest: () => {
         const opId = get().user.operatorId;
         if (!opId) return null;
@@ -1007,8 +1087,14 @@ export const useAppStore = create<AppState>()(
               : "digital";
         const needsShop =
           keysAccess === "physical" || keysAccess === "both";
-        const names = ["Rina (kost)", "Andi Student", "Maya UI", "Joko UNJ", "Salsa"];
-        const riderName = names[Math.floor(Math.random() * names.length)];
+        const names = [
+          { name: "Rina (kost)", phone: "+62 812-5555-0101" },
+          { name: "Andi Student", phone: "+62 812-5555-0202" },
+          { name: "Maya UI", phone: "+62 812-5555-0303" },
+          { name: "Joko UNJ", phone: "+62 812-5555-0404" },
+          { name: "Salsa", phone: "+62 812-5555-0505" },
+        ];
+        const rider = names[Math.floor(Math.random() * names.length)];
         const price = model?.pricePerHour
           ? Math.round(model.pricePerHour * 1.8)
           : 75_000;
@@ -1019,7 +1105,8 @@ export const useAppStore = create<AppState>()(
           vehicleId: vehicle.id,
           modelId: vehicle.modelId,
           siteId: vehicle.siteId,
-          riderName,
+          riderName: rider.name,
+          riderPhone: rider.phone,
           status: "pending",
           pickupType: needsShop ? "front_desk" : "self_service",
           rentalMode: keysAccess === "physical" ? "key_handover" : "digital",
@@ -1055,13 +1142,13 @@ export const useAppStore = create<AppState>()(
             {
               id: `n-req-${booking.id}`,
               title: "New booking request",
-              body: `${riderName} wants ${vehicle.name} (${vehicle.code}). Tap Accept.`,
+              body: `${rider.name} (${rider.phone}) wants ${vehicle.name} (${vehicle.code}). Tap Accept.`,
               read: false,
               createdAt: new Date().toISOString(),
             },
             ...s.notifications,
           ],
-          toast: `${riderName} asked to rent — Accept or Reject`,
+          toast: `${rider.name} asked to rent — Accept or Reject`,
         }));
         return booking;
       },
@@ -1070,7 +1157,10 @@ export const useAppStore = create<AppState>()(
         set({
           sites: seedSites,
           models: seedModels,
-          vehicles: seedVehicles,
+          vehicles: syncVehicleStatusesFromBookings(
+            seedVehicles,
+            seedMockBookings,
+          ),
           operators: seedOperators,
           bookings: seedMockBookings,
           pricing: seedPricing,
@@ -1173,18 +1263,67 @@ export const useAppStore = create<AppState>()(
               area: s.area || s.name,
             }));
           }
-          const needsJakartaSpread =
-            !state.sites.some((s) => s.id === "site-jakarta-tebet") ||
+          const margoSites = state.sites.filter(
+            (s) => s.operatorId === "op-margonda",
+          );
+          const margoFleet = state.vehicles.filter(
+            (v) => v.operatorId === "op-margonda",
+          );
+          const needsCompactHubs =
+            margoSites.length !== 3 ||
+            margoFleet.length < 30 ||
+            !margoSites.every((s) => s.whatsapp && s.mapImage) ||
             state.sites.some((s) =>
-              ["site-margonda-b2", "site-casan-margonda", "site-margonda-bandung"].includes(
-                s.id,
-              ),
+              [
+                "site-jakarta-sudirman",
+                "site-jakarta-rawamangun",
+                "site-jakarta-kelapa",
+                "site-tebet-alley",
+                "site-rawa-rack",
+                "site-bali-lotb",
+                "site-beach-pin",
+                "site-ubud-north",
+              ].includes(s.id),
             );
-          if (needsJakartaSpread) {
+          if (needsCompactHubs) {
             state.sites = seedSites;
             state.vehicles = seedVehicles;
             state.operators = seedOperators;
+            // Drop bookings that point at removed vehicles/sites
+            const validVehicles = new Set(seedVehicles.map((v) => v.id));
+            const validSites = new Set(seedSites.map((s) => s.id));
+            state.bookings = state.bookings.filter(
+              (b) =>
+                b.status === "completed" ||
+                b.status === "cancelled" ||
+                (validVehicles.has(b.vehicleId) && validSites.has(b.siteId)),
+            );
+            if (!state.bookings.some((b) => b.id.startsWith("bk-mock-"))) {
+              state.bookings = [...seedMockBookings, ...state.bookings];
+            }
           }
+          // Backfill color on older persisted units
+          const palette = [
+            { color: "Black", colorHex: "#1C1C1E" },
+            { color: "White", colorHex: "#F2F2F7" },
+            { color: "Teal", colorHex: "#0D9488" },
+            { color: "Navy", colorHex: "#1E3A5F" },
+            { color: "Red", colorHex: "#C0392B" },
+            { color: "Silver", colorHex: "#A8B0B8" },
+          ];
+          state.vehicles = state.vehicles.map((v, i) =>
+            v.color && v.colorHex
+              ? v
+              : {
+                  ...v,
+                  color: palette[i % palette.length].color,
+                  colorHex: palette[i % palette.length].colorHex,
+                },
+          );
+          state.vehicles = syncVehicleStatusesFromBookings(
+            state.vehicles,
+            state.bookings,
+          );
           state.setHydrated(true);
         }
       },
@@ -1203,6 +1342,7 @@ export const useAppStore = create<AppState>()(
         pricing: s.pricing,
         weekendSurcharge: s.weekendSurcharge,
         lastSeenVersion: s.lastSeenVersion,
+        operatorActiveSiteId: s.operatorActiveSiteId,
       }),
     },
   ),

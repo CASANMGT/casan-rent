@@ -22,6 +22,8 @@ import {
 import { CalendarClock, MapPin, Navigation } from "lucide-react";
 import { MockMap } from "@/components/MockMap";
 import { StarRating, StarsText } from "@/components/StarRating";
+import { ContactActions } from "@/components/ContactActions";
+import { AuthGate } from "@/components/AuthGate";
 import type { Booking, PaymentMethod } from "@/lib/types";
 import { IS_DEMO } from "@/lib/demo";
 
@@ -41,6 +43,14 @@ const extendPayMethods: { id: PaymentMethod; name: string }[] = [
 ];
 
 export default function RidePage() {
+  return (
+    <AuthGate role="rider">
+      <RideInner />
+    </AuthGate>
+  );
+}
+
+function RideInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const bookings = useAppStore((s) => s.bookings);
@@ -49,6 +59,7 @@ export default function RidePage() {
   const sites = useAppStore((s) => s.sites);
   const toggleMotor = useAppStore((s) => s.toggleMotor);
   const completeReturn = useAppStore((s) => s.completeReturn);
+  const collectPhysicalKey = useAppStore((s) => s.collectPhysicalKey);
   const extendRide = useAppStore((s) => s.extendRide);
   const markOverdue = useAppStore((s) => s.markOverdue);
   const submitReview = useAppStore((s) => s.submitReview);
@@ -68,6 +79,7 @@ export default function RidePage() {
   const [extendPaying, setExtendPaying] = useState(false);
   const [rating, setRating] = useState(5);
   const [reviewNote, setReviewNote] = useState("");
+  const [simulatingKey, setSimulatingKey] = useState(false);
   /** Rider GPS — demo starts "away" so return is blocked until in zone. */
   const [riderPos, setRiderPos] = useState<{ lat: number; lng: number } | null>(
     null,
@@ -374,7 +386,7 @@ export default function RidePage() {
                 ? "Lock the vehicle via app. Parking photo optional (mock)."
                 : booking.physicalKeyReturned
                   ? "Staff confirmed that the physical key is back."
-                  : "Hand the physical key to staff. Return stays locked until staff confirms receipt."}
+                  : "Hand the physical key to staff at the hub. Return stays locked until they tap Receive key in the operator app."}
             </div>
             {!needsPhysicalReturn ? (
               <button
@@ -404,12 +416,58 @@ export default function RidePage() {
                 Staff received key · continue
               </button>
             ) : (
-              <div
-                className="mx-4 rounded-xl border px-4 py-3 text-center text-sm font-semibold"
-                style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
-              >
-                Waiting for staff to confirm the key…
-              </div>
+              <>
+                <div
+                  className="mx-4 rounded-xl border px-4 py-3 text-center text-sm font-semibold"
+                  style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
+                >
+                  Waiting for staff to confirm the key…
+                  <p
+                    className="mt-1 text-xs font-normal"
+                    style={{ color: "var(--text2)" }}
+                  >
+                    Ask staff to open Orders → Dipinjam → Receive key for{" "}
+                    {booking.code}.
+                  </p>
+                  {IS_DEMO ? (
+                    <button
+                      type="button"
+                      className="mt-3 w-full rounded-xl py-2.5 text-xs font-bold text-white"
+                      style={{
+                        background: "var(--primary)",
+                        opacity: simulatingKey ? 0.6 : 1,
+                      }}
+                      disabled={simulatingKey}
+                      onClick={() => {
+                        setSimulatingKey(true);
+                        setToast("Staff is confirming key receipt…");
+                        window.setTimeout(() => {
+                          collectPhysicalKey(booking.id);
+                          setSimulatingKey(false);
+                          setToast("Staff received key ✓");
+                        }, 1200);
+                      }}
+                    >
+                      {simulatingKey
+                        ? "Staff confirming…"
+                        : "Demo: simulate staff received key"}
+                    </button>
+                  ) : null}
+                </div>
+                {op ? (
+                  <div className="card">
+                    <div className="mb-2 font-bold text-sm">
+                      Staff not around? Contact the hub
+                    </div>
+                    <ContactActions
+                      phone={site?.whatsapp || op.phone}
+                      email={op.email}
+                      name={site?.name ?? op.name}
+                      bookingCode={booking.code}
+                    />
+                  </div>
+                ) : null}
+              </>
             )}
           </>
         ) : null}
@@ -563,7 +621,7 @@ export default function RidePage() {
           value={keysAccessLabel(booking.keysAccess ?? booking.rentalMode)}
           label="Keys"
         />
-        <Stat value={op.name.split(" ")[0]} label="Station" />
+        <Stat value={site?.name ?? op.name} label="Hub" />
       </div>
 
       {(booking.rentalMode === "digital" || booking.keysAccess === "both") &&

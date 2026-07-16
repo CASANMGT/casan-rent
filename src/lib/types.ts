@@ -4,7 +4,8 @@ export type VehicleStatus =
   | "reserved"
   | "rented"
   | "maintenance"
-  | "charging";
+  | "charging"
+  | "disabled";
 export type RentalMode = "digital" | "key_handover" | "both";
 /** What the rider gets for this booking. */
 export type KeysAccess = "digital" | "physical" | "both";
@@ -74,9 +75,16 @@ export interface OperatorSite {
   address: string;
   lat: number;
   lng: number;
+  /** Combined display, e.g. "06:00 - 22:00". */
   hours: string;
-  /** Location-specific WhatsApp number; falls back to operator phone. */
+  /** Opening time HH:MM */
+  opensAt?: string;
+  /** Closing time HH:MM */
+  closesAt?: string;
+  /** Location-specific WhatsApp / phone; falls back to operator phone. */
   whatsapp?: string;
+  /** Bundled OSM static map screenshot for this site. */
+  mapImage?: string;
   /** Short instructions / description shown to staff and riders. */
   storeInfo?: string;
   supportsFrontDesk: boolean;
@@ -138,6 +146,10 @@ export interface Vehicle {
   lng: number;
   emoji: string;
   requiresSimAck: boolean;
+  /** Display color name, e.g. Black / Teal. */
+  color: string;
+  /** Hex for swatch UI. */
+  colorHex: string;
 }
 
 export interface PricingTier {
@@ -198,6 +210,8 @@ export interface Booking {
   /** Fleet site of the assigned unit. */
   siteId: string;
   riderName: string;
+  /** Rider contact phone (WhatsApp / call). */
+  riderPhone?: string;
   status: BookingStatus;
   pickupType: PickupType;
   /** Ride control: digital = app motor; key_handover = physical only. */
@@ -254,4 +268,7 @@ export interface AppNotification {
   body: string;
   read: boolean;
   createdAt: string;
+  /** Deep link when rider taps the notification. */
+  href?: string;
+  bookingId?: string;
 }

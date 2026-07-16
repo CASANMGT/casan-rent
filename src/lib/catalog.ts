@@ -2,12 +2,14 @@ import type {
   BatteryVoltageV,
   Booking,
   ChargingAddon,
+  Operator,
   OperatorReview,
+  OperatorSite,
   Vehicle,
   VehicleModel,
   VehicleType,
 } from "./types";
-import { batteryWh } from "./format";
+import { batteryWh, haversineKm } from "./format";
 
 export function modelBatteryLabel(m: {
   batteryVoltageV: number | null;
@@ -128,6 +130,121 @@ export function listAllModels(
     })
     .filter((x) => x.availableCount > 0 || x.totalCount > 0)
     .sort((a, b) => b.availableCount - a.availableCount);
+}
+
+/** One listing per (model × site) with stock — distance from the site, not operator HQ. */
+export interface HubModelListing extends ModelListing {
+  siteId: string;
+  siteName: string;
+  siteArea: string;
+  siteCity: string;
+  operatorName: string;
+  distKm: number;
+}
+
+export function listModelsByHub(
+  models: VehicleModel[],
+  vehicles: Vehicle[],
+  sites: OperatorSite[],
+  operators: Operator[],
+  typeFilter: VehicleType | "all" = "all",
+  query = "",
+  userLat: number,
+  userLng: number,
+): HubModelListing[] {
+  const q = query.trim().toLowerCase();
+  const opName = Object.fromEntries(operators.map((o) => [o.id, o.name]));
+  const siteById = Object.fromEntries(sites.map((s) => [s.id, s]));
+  const results: HubModelListing[] = [];
+
+  for (const model of models) {
+    if (typeFilter !== "all" && model.vehicleType !== typeFilter) continue;
+
+    const available = availableUnits(vehicles, model.id);
+    const bySite = new Map<string, Vehicle[]>();
+    for (const v of available) {
+      if (!v.siteId) continue;
+      const list = bySite.get(v.siteId) ?? [];
+      list.push(v);
+      bySite.set(v.siteId, list);
+    }
+
+    for (const [siteId, unitsAtSite] of bySite) {
+      const site = siteById[siteId];
+      if (!site) continue;
+      const operatorName = opName[model.operatorId] ?? "";
+      const hay =
+        `${model.name} ${model.description} ${site.name} ${site.area} ${site.city} ${site.address} ${operatorName}`.toLowerCase();
+      if (q && !hay.includes(q)) continue;
+
+      const allAtSite = unitsForModel(vehicles, model.id).filter(
+        (v) => v.siteId === siteId,
+      );
+      const batts = unitsAtSite
+        .map((v) => v.batteryPct)
+        .filter((b): b is number => b != null);
+
+      results.push({
+        model,
+        availableCount: unitsAtSite.length,
+        totalCount: allAtSite.length,
+        bestBattery: batts.length ? Math.max(...batts) : null,
+        siteId,
+        siteName: site.name,
+        siteArea: site.area,
+        siteCity: site.city,
+        operatorName,
+        distKm: haversineKm(userLat, userLng, site.lat, site.lng),
+      });
+    }
+  }
+
+  return results.sort((a, b) => a.distKm - b.distKm);
+}
+
+export interface HubListing {
+  site: OperatorSite;
+  operator: Operator;
+  distKm: number;
+  availableCount: number;
+  ratingAvg: number | null;
+}
+
+/** Rider discovery unit: a physical pickup location (site), not the operator brand. */
+export function listHubs(
+  sites: OperatorSite[],
+  operators: Operator[],
+  vehicles: Vehicle[],
+  bookings: Booking[],
+  reviews: OperatorReview[],
+  query = "",
+  userLat: number,
+  userLng: number,
+): HubListing[] {
+  const q = query.trim().toLowerCase();
+  const opById = Object.fromEntries(operators.map((o) => [o.id, o]));
+
+  return sites
+    .map((site) => {
+      const operator = opById[site.operatorId];
+      if (!operator) return null;
+      const hay =
+        `${site.name} ${site.area} ${site.city} ${site.address} ${operator.name}`.toLowerCase();
+      if (q && !hay.includes(q)) return null;
+      const availableCount = vehicles.filter(
+        (v) => v.siteId === site.id && v.status === "available",
+      ).length;
+      const rating = operatorRatingStats(operator.id, bookings, reviews);
+      return {
+        site,
+        operator,
+        distKm: haversineKm(userLat, userLng, site.lat, site.lng),
+        availableCount,
+        ratingAvg: rating.count ? rating.avg : null,
+      };
+    })
+    .filter((x): x is HubListing => x != null)
+    .sort((a, b) => a.distKm - b.distKm);
 }
 
 export function operatorRatingStats(

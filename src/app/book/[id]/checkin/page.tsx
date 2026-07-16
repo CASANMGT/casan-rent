@@ -3,9 +3,18 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/Header";
+import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 
 export default function CheckinPage() {
+  return (
+    <AuthGate role="rider">
+      <CheckinInner />
+    </AuthGate>
+  );
+}
+
+function CheckinInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const bookings = useAppStore((s) => s.bookings);

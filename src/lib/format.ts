@@ -151,9 +151,9 @@ export function keysAccessLabel(keys: string): string {
       return "App unlock only";
     case "physical":
     case "key_handover":
-      return "Physical key at shop";
+      return "Physical key at hub";
     case "both":
-      return "App unlock + shop key";
+      return "App unlock + hub key";
     default:
       return keys;
   }
@@ -260,6 +260,42 @@ export function osmStaticMapUrl(
   h = 360,
 ): string {
   return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=${zoom}&size=${w}x${h}&maptype=mapnik`;
+}
+
+export function paymentMethodLabel(method: string): string {
+  switch (method) {
+    case "qris":
+      return "QRIS";
+    case "gopay":
+      return "GoPay";
+    case "ovo":
+      return "OVO";
+    case "dana":
+      return "DANA";
+    case "pay_at_operator":
+      return "Bayar di toko";
+    default:
+      return method;
+  }
+}
+
+export function pickupTypeLabel(pickup: string): string {
+  return pickup === "self_service" ? "Ambil sendiri" : "Ambil di toko";
+}
+
+export function siteOpenClose(site: {
+  opensAt?: string;
+  closesAt?: string;
+  hours: string;
+}): { open: string; close: string } {
+  if (site.opensAt && site.closesAt) {
+    return { open: site.opensAt, close: site.closesAt };
+  }
+  const parts = site.hours.split(/\s*[-–—]\s*/);
+  if (parts.length >= 2) {
+    return { open: parts[0].trim(), close: parts[1].trim() };
+  }
+  return { open: site.hours, close: "—" };
 }
 
 export function batteryWh(voltageV: number, ah: number): number {

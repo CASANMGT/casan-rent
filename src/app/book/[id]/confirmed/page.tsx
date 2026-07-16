@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/Header";
 import { ContactActions } from "@/components/ContactActions";
+import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import {
   formatIdr,
@@ -14,6 +15,14 @@ import {
 import { IS_DEMO } from "@/lib/demo";
 
 export default function BookingConfirmedPage() {
+  return (
+    <AuthGate role="rider">
+      <BookingConfirmedInner />
+    </AuthGate>
+  );
+}
+
+function BookingConfirmedInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const bookings = useAppStore((s) => s.bookings);
@@ -37,7 +46,7 @@ export default function BookingConfirmedPage() {
       booking.status !== "pending" &&
       booking.status !== "cancelled"
     ) {
-      setToast("Operator confirmed — ready for pickup");
+      setToast("Hub confirmed — ready for pickup");
       setSimulating(false);
     }
     prevStatus.current = booking.status;
@@ -64,7 +73,7 @@ export default function BookingConfirmedPage() {
 
   function simulateConfirm() {
     setSimulating(true);
-    setToast("Sending request to operator…");
+    setToast("Sending request to hub…");
     window.setTimeout(() => {
       confirmBooking(booking!.id);
     }, 1200);
@@ -75,9 +84,9 @@ export default function BookingConfirmedPage() {
       <Header
         title={
           waitingConfirm
-            ? "Waiting for operator"
+            ? "Waiting for hub confirm"
             : payAtCounter
-              ? "Pay at pickup"
+              ? "Pay at hub"
             : ready
               ? "Ready for pickup"
               : "Your booking"
@@ -204,7 +213,7 @@ export default function BookingConfirmedPage() {
         style={{ opacity: waitingConfirm ? 0.5 : 1 }}
         onClick={() => {
           if (waitingConfirm) {
-            setToast("Still waiting for operator confirm");
+            setToast("Still waiting for hub confirm");
             return;
           }
           router.push(
@@ -215,13 +224,13 @@ export default function BookingConfirmedPage() {
         }}
       >
         {waitingConfirm
-          ? "Waiting for operator confirm…"
+          ? "Waiting for hub confirm…"
           : payAtCounter
-            ? "Go to shop · pay and collect"
+            ? "Go to hub · pay and collect"
           : needsShop
             ? keys === "both"
               ? "I've arrived — collect key + start"
-              : "I've arrived / collect at shop"
+              : "I've arrived / collect at hub"
             : "Self check-in (app unlock)"}
       </button>
 
@@ -232,10 +241,10 @@ export default function BookingConfirmedPage() {
             className="mt-2 list-decimal space-y-1 pl-4 text-sm"
             style={{ color: "var(--text2)" }}
           >
-            <li>Go to shop: {shopLabel}</li>
+            <li>Go to hub: {shopLabel}</li>
             <li>Show booking code {booking.code} to staff</li>
             <li>
-              Collect the <strong>physical key</strong> (handedness at counter)
+              Collect the <strong>physical key</strong> (handed over at counter)
             </li>
             <li>
               Unlock & control motor with the <strong>app digital key</strong>

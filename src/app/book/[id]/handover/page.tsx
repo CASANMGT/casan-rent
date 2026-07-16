@@ -4,12 +4,21 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Header } from "@/components/Header";
 import { ContactActions } from "@/components/ContactActions";
+import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import { batteryPctLabel, keysAccessLabel } from "@/lib/format";
 import { modelBatteryLabel } from "@/lib/catalog";
 import { IS_DEMO } from "@/lib/demo";
 
 export default function HandoverPage() {
+  return (
+    <AuthGate role="rider">
+      <HandoverInner />
+    </AuthGate>
+  );
+}
+
+function HandoverInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const bookings = useAppStore((s) => s.bookings);
@@ -73,7 +82,7 @@ export default function HandoverPage() {
       </div>
 
       <div className="card text-sm">
-        <div className="font-bold">At the shop counter</div>
+        <div className="font-bold">At the hub counter</div>
         <ol
           className="mt-2 list-decimal space-y-1.5 pl-4"
           style={{ color: "var(--text2)" }}
@@ -105,7 +114,7 @@ export default function HandoverPage() {
             className="mt-3 rounded-xl border p-3 text-xs"
             style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
           >
-            Waiting for operator to hand over the physical key…
+            Waiting for hub staff to hand over the physical key…
             <br />
             <span style={{ color: "var(--text2)" }}>
               Staff must confirm “Give key” in the operator app before you can

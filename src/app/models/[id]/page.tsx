@@ -1,23 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAppStore } from "@/lib/store";
 import { DEPOSIT_IDR, defaultPricingForHourly } from "@/lib/seed";
 import {
-  batteryWh,
   formatIdr,
   formatIdrShort,
+  formatReturnBy,
   modeLabel,
-  batteryPctLabel,
-  osmBrowseUrl,
   vehicleTypeLabel,
 } from "@/lib/format";
 import type { PickupType } from "@/lib/types";
 import { PhotoGallery } from "@/components/PhotoGallery";
-import { ContactActions } from "@/components/ContactActions";
-import { MockMap } from "@/components/MockMap";
 import {
   adaptersForVoltage,
   availableUnits,
@@ -26,27 +22,75 @@ import {
   operatorRatingStats,
 } from "@/lib/catalog";
 import { Header } from "@/components/Header";
+import { AuthGate } from "@/components/AuthGate";
 
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function defaultAppointmentInput(): string {
+function defaultSoonInput(): string {
   const d = new Date(Date.now() + 60 * 60_000);
   d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0);
   return toLocalInput(d);
 }
 
-function appointmentSlot(hoursFromNow: number, label: string) {
-  const d = new Date(Date.now() + hoursFromNow * 60_000);
+function defaultLaterInput(): string {
+  return daySlot(1, 9, "").value;
+}
+
+/** `minutesFromNow` — rounded up to next 15 min. */
+function appointmentSlot(minutesFromNow: number, label: string) {
+  const d = new Date(Date.now() + minutesFromNow * 60_000);
   d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0);
   return { label, value: toLocalInput(d) };
 }
 
+/** Fixed morning/afternoon on a future calendar day. */
+function daySlot(daysAhead: number, hour: number, label: string) {
+  const d = new Date();
+  d.setDate(d.getDate() + daysAhead);
+  d.setHours(hour, 0, 0, 0);
+  if (d.getTime() <= Date.now()) {
+    d.setDate(d.getDate() + 1);
+  }
+  return { label, value: toLocalInput(d) };
+}
+
+const MAX_ADVANCE_DAYS = 14;
+
+function weekdayLabel(daysAhead: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + daysAhead);
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
+
 export default function ModelDetailPage() {
+  return (
+    <AuthGate role="rider">
+      <Suspense
+        fallback={
+          <div>
+            <Header title="Loading…" backHref="/home" />
+            <p className="p-6 text-sm" style={{ color: "var(--text2)" }}>
+              Loading booking…
+            </p>
+          </div>
+        }
+      >
+        <ModelDetailInner />
+      </Suspense>
+    </AuthGate>
+  );
+}
+
+function ModelDetailInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const siteParam = searchParams.get("site");
+  const whenLater = searchParams.get("when") === "later";
+
   const models = useAppStore((s) => s.models);
   const vehicles = useAppStore((s) => s.vehicles);
   const operators = useAppStore((s) => s.operators);
@@ -104,12 +148,29 @@ export default function ModelDetailPage() {
   const [voucherId, setVoucherId] = useState<string | null>(null);
   const [adapterId, setAdapterId] = useState<string | null>(null);
   const [showCharging, setShowCharging] = useState(false);
-  const [appointmentInput, setAppointmentInput] = useState(
-    defaultAppointmentInput,
+  const [whenMode, setWhenMode] = useState<"soon" | "later">(
+    whenLater ? "later" : "soon",
+  );
+  const [appointmentInput, setAppointmentInput] = useState(() =>
+    whenLater ? defaultLaterInput() : defaultSoonInput(),
   );
   const [selectedSiteId, setSelectedSiteId] = useState(
-    units[0]?.siteId ?? "",
+    () => siteParam || units[0]?.siteId || "",
   );
+  const [showOtherHubs, setShowOtherHubs] = useState(false);
+
+  useEffect(() => {
+    if (!siteParam) return;
+    if (availableSites.some(({ site }) => site.id === siteParam)) {
+      setSelectedSiteId(siteParam);
+    }
+  }, [siteParam, availableSites]);
+
+  useEffect(() => {
+    if (!whenLater) return;
+    setWhenMode("later");
+    setAppointmentInput(defaultLaterInput());
+  }, [whenLater]);
 
   if (!model || !op) {
     return (
@@ -134,10 +195,14 @@ export default function ModelDetailPage() {
     (unit) => unit.siteId === selectedSite?.id,
   );
   const appointmentMs = new Date(appointmentInput).getTime();
+  const maxAdvanceMs = Date.now() + MAX_ADVANCE_DAYS * 24 * 60 * 60_000;
+  const appointmentTooFar =
+    Number.isFinite(appointmentMs) && appointmentMs > maxAdvanceMs;
   const appointmentValid =
     Boolean(appointmentInput) &&
     Number.isFinite(appointmentMs) &&
-    appointmentMs >= Date.now();
+    appointmentMs >= Date.now() &&
+    !appointmentTooFar;
   const canBook =
     selectedSiteUnits.length > 0 &&
     (selectedSiteUnits[0].batteryPct == null ||
@@ -165,15 +230,36 @@ export default function ModelDetailPage() {
       setToast("No units available right now");
       return;
     }
-    setToast("Booking created — continue to payment");
+    const collectLabel = formatReturnBy(new Date(appointmentMs).toISOString());
+    setToast(
+      whenMode === "later"
+        ? `Reserved — collect ${collectLabel}`
+        : "Booking created — continue to payment",
+    );
     router.push(`/book/${booking.id}`);
   }
 
-  const slots = [
+  const soonSlots = [
     appointmentSlot(60, "In 1 hour"),
     appointmentSlot(120, "In 2 hours"),
-    appointmentSlot(24 * 60, "Tomorrow"),
+    appointmentSlot(180, "In 3 hours"),
   ];
+  const laterSlots = [
+    daySlot(1, 9, `Tomorrow 09:00`),
+    daySlot(1, 14, `Tomorrow 14:00`),
+    daySlot(2, 9, `${weekdayLabel(2)} 09:00`),
+    daySlot(3, 9, `${weekdayLabel(3)} 09:00`),
+    daySlot(7, 9, `${weekdayLabel(7)} 09:00`),
+  ];
+  const slots = whenMode === "later" ? laterSlots : soonSlots;
+  const collectSummary = appointmentValid
+    ? formatReturnBy(new Date(appointmentMs).toISOString())
+    : null;
+
+  function switchWhenMode(mode: "soon" | "later") {
+    setWhenMode(mode);
+    setAppointmentInput(mode === "later" ? defaultLaterInput() : defaultSoonInput());
+  }
 
   return (
     <div className="pb-32">
@@ -198,102 +284,54 @@ export default function ModelDetailPage() {
         </div>
       </div>
 
-      <div className="card -mt-2">
+      <div className="card -mt-2 !py-3">
         <Link
-          href={`/operators/${op.id}`}
+          href={
+            selectedSite
+              ? `/operators/${op.id}?site=${selectedSite.id}`
+              : `/operators/${op.id}`
+          }
           className="flex items-center justify-between"
         >
-          <div>
-            <div className="font-bold text-sm">{op.name}</div>
+          <div className="min-w-0">
+            <div className="truncate font-bold text-sm">{model.name}</div>
             <div className="text-xs" style={{ color: "var(--text2)" }}>
-              {rating.count > 0 ? (
-                <>
-                  <span style={{ color: "#F4D03F" }}>★</span> {rating.avg} ·{" "}
-                  {rating.count} reviews
-                </>
-              ) : (
-                "New operator"
-              )}
-              {op.city ? ` · ${op.city}` : ""}
+              {op.name}
+              {rating.count > 0 ? ` · ★ ${rating.avg}` : ""}
+              {` · ${vehicleTypeLabel(model.vehicleType)}`}
             </div>
           </div>
           <span
-            className="text-xs font-semibold"
+            className="shrink-0 text-xs font-semibold"
             style={{ color: "var(--primary)" }}
           >
-            View →
+            Hub →
           </span>
         </Link>
-        <p className="mt-3 text-sm" style={{ color: "var(--text2)" }}>
-          {model.description}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {model.includes.map((inc) => (
-            <span
-              key={inc}
-              className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
-              style={{ background: "var(--bg-deep)", color: "var(--primary)" }}
-            >
-              {inc}
-            </span>
-          ))}
-        </div>
       </div>
 
       <div
-        className="mx-4 grid grid-cols-3 gap-3 rounded-2xl p-4"
-        style={{ background: "var(--card)" }}
+        className="mx-4 mt-2 flex gap-2 overflow-x-auto pb-1"
       >
-        {model.vehicleType === "bicycle" || model.batteryVoltageV == null ? (
-          <>
-            <Spec value="Pedal" label="Power" />
-            <Spec value="Physical" label="Key" />
-            <Spec value={String(units.length)} label="In stock" />
-          </>
-        ) : (
-          <>
-            <Spec value={`${model.batteryVoltageV}V`} label="Battery V" />
-            <Spec value={`${model.batteryAh}Ah`} label="Capacity" />
-            <Spec
-              value={`${batteryWh(model.batteryVoltageV, model.batteryAh!)}Wh`}
-              label="Energy"
-            />
-            <Spec
-              value={
-                units.some((u) => u.batteryPct != null)
-                  ? `up to ${Math.max(...units.map((u) => u.batteryPct ?? 0))}%`
-                  : batteryPctLabel(null, model.vehicleType)
-              }
-              label="Charge now"
-            />
-            <Spec value={modeLabel(model.rentalMode)} label="Keys" />
-            <Spec value={String(units.length)} label="In stock" />
-          </>
-        )}
-      </div>
-
-      {(model.rentalMode === "both" || model.rentalMode === "key_handover") ? (
-        <div
-          className="mx-4 mt-3 rounded-xl border p-3 text-xs"
-          style={{
-            borderColor: "var(--primary)",
-            background: "color-mix(in srgb, var(--primary) 8%, white)",
-          }}
+        <span
+          className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+          style={{ background: "var(--bg-deep)", color: "var(--primary)" }}
         >
-          <div className="font-bold" style={{ color: "var(--primary)" }}>
-            {model.rentalMode === "both"
-              ? "App digital key + physical key"
-              : "Physical key at shop only"}
-          </div>
-          <p className="mt-1" style={{ color: "var(--text2)" }}>
-            {model.vehicleType === "bicycle"
-              ? "No battery pack. Staff give you the metal key at the shop, and collect it when you return."
-              : model.rentalMode === "both"
-                ? "Pick up the real key at the shop, then unlock/start the motor in the app."
-                : "Collect the physical key at the shop after staff confirm your request."}
-          </p>
-        </div>
-      ) : null}
+          {modelBatteryLabel(model)}
+        </span>
+        <span
+          className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+          style={{ background: "var(--bg-deep)", color: "var(--text2)" }}
+        >
+          {modeLabel(model.rentalMode)}
+        </span>
+        <span
+          className="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+          style={{ background: "#E8F8F5", color: "var(--ok)" }}
+        >
+          {units.length} ready
+        </span>
+      </div>
 
       {model.vehicleType !== "bicycle" && model.batteryVoltageV != null ? (
         <>
@@ -394,119 +432,174 @@ export default function ModelDetailPage() {
         </>
       ) : null}
 
-      <p className="section-label">Choose pickup location</p>
-      <div className="mx-4 space-y-2">
-        {availableSites.map(({ site, count }) => (
-          <button
-            key={site.id}
-            type="button"
-            className="w-full rounded-2xl border-2 p-3.5 text-left"
+      <p className="section-label">Pickup hub</p>
+      <div className="mx-4">
+        {selectedSite ? (
+          <div
+            className="rounded-2xl border-2 p-3.5"
             style={{
-              borderColor:
-                selectedSite?.id === site.id
-                  ? "var(--primary)"
-                  : "var(--border)",
-              background:
-                selectedSite?.id === site.id
-                  ? "color-mix(in srgb, var(--primary) 8%, white)"
-                  : "var(--card)",
+              borderColor: "var(--primary)",
+              background: "color-mix(in srgb, var(--primary) 8%, white)",
             }}
-            onClick={() => setSelectedSiteId(site.id)}
           >
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="font-bold text-sm">{site.name}</div>
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--primary)" }}>
+                  Main pickup
+                </div>
+                <div className="font-bold text-sm">{selectedSite.name}</div>
                 <div className="text-xs" style={{ color: "var(--text2)" }}>
-                  {site.area} · {site.address}
-                  <br />
-                  Open {site.hours}
+                  {selectedSite.area} · Open {selectedSite.hours}
                 </div>
               </div>
               <span
-                className="rounded-full px-2.5 py-1 text-xs font-bold"
+                className="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
                 style={{ background: "#E8F8F5", color: "var(--ok)" }}
               >
-                {count} available
+                {selectedSiteUnits.length} ready
               </span>
             </div>
-          </button>
-        ))}
+            {availableSites.length > 1 ? (
+              <button
+                type="button"
+                className="mt-2 text-xs font-bold"
+                style={{ color: "var(--primary)" }}
+                onClick={() => setShowOtherHubs((v) => !v)}
+              >
+                {showOtherHubs ? "Hide other hubs" : "Select other hub →"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {showOtherHubs && availableSites.length > 1 ? (
+          <div className="mt-2 space-y-2">
+            {availableSites
+              .filter(({ site }) => site.id !== selectedSite?.id)
+              .map(({ site, count }) => (
+                <button
+                  key={site.id}
+                  type="button"
+                  className="w-full rounded-2xl border p-3 text-left"
+                  style={{
+                    borderColor: "var(--border)",
+                    background: "var(--card)",
+                  }}
+                  onClick={() => {
+                    setSelectedSiteId(site.id);
+                    setShowOtherHubs(false);
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-bold text-sm">{site.name}</div>
+                      <div className="text-xs" style={{ color: "var(--text2)" }}>
+                        {site.area}
+                      </div>
+                    </div>
+                    <span
+                      className="text-xs font-bold"
+                      style={{ color: "var(--ok)" }}
+                    >
+                      {count} ready
+                    </span>
+                  </div>
+                </button>
+              ))}
+          </div>
+        ) : null}
       </div>
 
-      <p className="section-label">How will you pick up?</p>
-      {model.rentalMode === "both" || model.rentalMode === "key_handover" ? (
-        <PickupOption
-          selected
-          title="Collect at shop (required)"
-          desc={`${op.shopPickupLabel}. ${
-            model.rentalMode === "both"
-              ? "Physical key handover + app digital unlock."
-              : "Physical key handover with staff."
-          } Booking request needs operator confirm.`}
-          onClick={() => setPickup("front_desk")}
-        />
-      ) : (
+      {(model.allowFrontDesk && model.allowSelfService && model.rentalMode === "digital") ||
+      (model.allowFrontDesk && model.allowSelfService && model.rentalMode === "both") ? (
         <>
-          {model.allowFrontDesk ? (
-            <PickupOption
-              selected={pickup === "front_desk"}
-              title="Collect at shop"
-              desc={`${op.shopPickupLabel}. Staff will hand over the bike.`}
-              onClick={() => setPickup("front_desk")}
-            />
-          ) : null}
-          {model.allowSelfService ? (
-            <PickupOption
-              selected={pickup === "self_service"}
-              title="Self-collect at location"
-              desc={`${op.selfCollectLabel}. App digital key — no staff required.`}
-              onClick={() => setPickup("self_service")}
-            />
-          ) : null}
-        </>
-      )}
-
-      {pickup === "self_service" &&
-      model.allowSelfService &&
-      model.rentalMode === "digital" ? (
-        <>
-          <div className="mx-4 mb-2">
-            <MockMap
-              height={140}
-              mapImage={op.mapImage}
-              label="OpenStreetMap · self-collect"
-              pins={[
-                {
-                  id: "self",
-                  label: "Self-collect",
-                  top: "48%",
-                  left: "58%",
-                },
-              ]}
-              userPin={{ top: "68%", left: "38%" }}
-            />
+          <p className="section-label">Pickup style</p>
+          <div className="mx-4 grid grid-cols-2 gap-2">
+            {model.allowFrontDesk ? (
+              <button
+                type="button"
+                className="rounded-xl border-2 py-2.5 text-xs font-bold"
+                style={{
+                  borderColor:
+                    pickup === "front_desk" ? "var(--primary)" : "var(--border)",
+                  background:
+                    pickup === "front_desk"
+                      ? "color-mix(in srgb, var(--primary) 10%, white)"
+                      : "var(--card)",
+                  color:
+                    pickup === "front_desk" ? "var(--primary)" : "var(--text2)",
+                }}
+                onClick={() => setPickup("front_desk")}
+              >
+                Shop pickup
+              </button>
+            ) : null}
+            {model.allowSelfService ? (
+              <button
+                type="button"
+                className="rounded-xl border-2 py-2.5 text-xs font-bold"
+                style={{
+                  borderColor:
+                    pickup === "self_service" ? "var(--primary)" : "var(--border)",
+                  background:
+                    pickup === "self_service"
+                      ? "color-mix(in srgb, var(--primary) 10%, white)"
+                      : "var(--card)",
+                  color:
+                    pickup === "self_service" ? "var(--primary)" : "var(--text2)",
+                }}
+                onClick={() => setPickup("self_service")}
+              >
+                Self-unlock
+              </button>
+            ) : null}
           </div>
-          <a
-            className="mx-4 mb-2 block rounded-xl px-3 py-2 text-center text-xs font-bold"
-            style={{ background: "var(--bg-deep)", color: "var(--primary)" }}
-            href={osmBrowseUrl(op.selfCollectLat, op.selfCollectLng)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open self-collect pin on OpenStreetMap →
-          </a>
         </>
+      ) : model.rentalMode === "both" || model.rentalMode === "key_handover" ? (
+        <p className="mx-4 mt-3 text-xs" style={{ color: "var(--text2)" }}>
+          Shop pickup required · staff hand over the key
+        </p>
       ) : null}
 
-      <p className="section-label">Pickup appointment</p>
+      <p className="section-label">Book now or later</p>
       <div className="card !py-3">
-        <label className="text-sm font-bold" htmlFor="pickup-appointment">
-          Date and time to collect
+        <div className="grid grid-cols-2 gap-2">
+          {(
+            [
+              ["soon", "Book now"],
+              ["later", "Book later"],
+            ] as const
+          ).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              className="rounded-xl border-2 py-2.5 text-xs font-bold"
+              style={{
+                borderColor:
+                  whenMode === mode ? "var(--primary)" : "var(--border)",
+                background:
+                  whenMode === mode
+                    ? "color-mix(in srgb, var(--primary) 10%, white)"
+                    : "var(--bg)",
+                color: whenMode === mode ? "var(--primary)" : "var(--text2)",
+              }}
+              onClick={() => switchWhenMode(mode)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs" style={{ color: "var(--text2)" }}>
+          {whenMode === "later"
+            ? `Advance booking — pick a date & time up to ${MAX_ADVANCE_DAYS} days ahead.`
+            : "Pickup today — choose a time in the next few hours."}
+        </p>
+        <label className="mt-3 block text-sm font-bold" htmlFor="pickup-appointment">
+          {whenMode === "later" ? "Select date & time" : "Pickup time"}
         </label>
         <div className="mt-2 flex flex-wrap gap-2">
           {slots.map((s) => (
             <button
-              key={s.label}
+              key={s.label + s.value}
               type="button"
               className="rounded-full border px-3 py-1.5 text-xs font-semibold"
               style={{
@@ -536,14 +629,30 @@ export default function ModelDetailPage() {
           style={{ borderColor: "var(--border)", background: "var(--bg)" }}
           value={appointmentInput}
           min={toLocalInput(new Date())}
+          max={toLocalInput(new Date(maxAdvanceMs))}
           onChange={(e) => setAppointmentInput(e.target.value)}
         />
-        <p className="mt-1.5 text-xs" style={{ color: "var(--text2)" }}>
-          The operator will see this appointment on your order.
-        </p>
+        {collectSummary ? (
+          <p
+            className="mt-2 rounded-lg px-2.5 py-2 text-xs font-semibold"
+            style={{
+              background: "color-mix(in srgb, var(--primary) 10%, white)",
+              color: "var(--primary)",
+            }}
+          >
+            Collect {collectSummary}
+            {selectedSite ? ` · ${selectedSite.name}` : ""}
+          </p>
+        ) : (
+          <p className="mt-1.5 text-xs" style={{ color: "var(--text2)" }}>
+            The operator will see this appointment on your order.
+          </p>
+        )}
         {!appointmentValid ? (
           <p className="mt-1 text-xs font-semibold" style={{ color: "var(--warn)" }}>
-            Pick a time in the future
+            {appointmentTooFar
+              ? `Furthest you can book is ${MAX_ADVANCE_DAYS} days ahead`
+              : "Pick a time in the future"}
           </p>
         ) : null}
       </div>
@@ -587,9 +696,26 @@ export default function ModelDetailPage() {
         </label>
       ) : null}
 
-      <div className="card">
-        <div className="mb-2 font-bold text-sm">Questions? Contact {op.name}</div>
-        <ContactActions phone={op.phone} email={op.email} name={op.name} />
+      <div
+        className="mx-4 mt-3 rounded-2xl border px-4 py-3"
+        style={{
+          borderColor: "var(--ok)",
+          background: "#E8F8F5",
+        }}
+      >
+        <div className="text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--ok)" }}>
+          Refundable deposit
+        </div>
+        <div className="mt-0.5 flex items-baseline justify-between gap-2">
+          <div className="text-lg font-extrabold" style={{ color: "var(--ok)" }}>
+            {formatIdr(DEPOSIT_IDR)}
+          </div>
+          <div className="text-right text-[11px] font-semibold" style={{ color: "var(--text2)" }}>
+            Returned after
+            <br />
+            you bring the bike back
+          </div>
+        </div>
       </div>
 
       <div
@@ -607,20 +733,21 @@ export default function ModelDetailPage() {
               {selectedAddons.length
                 ? ` · +${selectedAddons.length} add-on`
                 : ""}
+              {collectSummary ? ` · ${collectSummary}` : ""}
             </div>
             <div className="text-lg font-extrabold">{formatIdr(total)}</div>
-            <div className="text-[11px]" style={{ color: "var(--text2)" }}>
+            <div className="text-[11px] font-semibold" style={{ color: "var(--ok)" }}>
               Incl. {formatIdrShort(DEPOSIT_IDR)} refundable deposit
             </div>
           </div>
           <button
             type="button"
-            className="btn-primary !mt-0 !w-auto shrink-0 px-5 py-3"
+            className="btn-primary !mt-0 !w-auto shrink-0 px-8 py-3"
             disabled={!canBook}
             style={{ opacity: canBook ? 1 : 0.5 }}
             onClick={book}
           >
-            {units.length === 0 ? "Sold out" : "Continue"}
+            {units.length === 0 ? "Sold out" : "Book"}
           </button>
         </div>
         {!canBook && units.length > 0 ? (
@@ -631,23 +758,12 @@ export default function ModelDetailPage() {
             {model.requiresSimAck && !simAck
               ? "Tick the SIM / license box above to continue"
               : !appointmentValid
-                ? "Choose a future pickup appointment"
+                ? appointmentTooFar
+                  ? `Book within the next ${MAX_ADVANCE_DAYS} days`
+                  : "Choose a future pickup appointment"
                 : "All units are low on battery right now — try again soon"}
           </p>
         ) : null}
-      </div>
-    </div>
-  );
-}
-
-function Spec({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="text-center">
-      <div className="text-base font-bold" style={{ color: "var(--primary)" }}>
-        {value}
-      </div>
-      <div className="text-[11px]" style={{ color: "var(--text2)" }}>
-        {label}
       </div>
     </div>
   );
@@ -707,50 +823,6 @@ function AddonChoice({
         >
           {selected ? "✓" : ""}
         </div>
-      </div>
-    </button>
-  );
-}
-
-function PickupOption({
-  selected,
-  title,
-  desc,
-  onClick,
-}: {
-  selected: boolean;
-  title: string;
-  desc: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mx-4 mb-2 flex w-[calc(100%-32px)] items-center gap-3 rounded-2xl border-2 p-4 text-left"
-      style={{
-        borderColor: selected ? "var(--primary)" : "var(--border)",
-        background: selected
-          ? "color-mix(in srgb, var(--primary) 8%, white)"
-          : "var(--card)",
-      }}
-    >
-      <div className="flex-1">
-        <div className="font-bold text-[15px]">{title}</div>
-        <div className="text-xs" style={{ color: "var(--text2)" }}>
-          {desc}
-        </div>
-      </div>
-      <div
-        className="flex h-5 w-5 items-center justify-center rounded-full border-2"
-        style={{
-          borderColor: selected ? "var(--primary)" : "var(--border)",
-          background: selected ? "var(--primary)" : "transparent",
-          color: "white",
-          fontSize: 11,
-        }}
-      >
-        {selected ? "✓" : ""}
       </div>
     </button>
   );
