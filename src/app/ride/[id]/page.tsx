@@ -12,9 +12,16 @@ import {
   formatTimer,
   batteryPctLabel,
   keysAccessLabel,
+  distanceMeters,
+  formatMetersAway,
+  isInsideReturnGeofence,
+  RETURN_GEOFENCE_M,
+  USER_LAT,
+  USER_LNG,
 } from "@/lib/format";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, MapPin, Navigation } from "lucide-react";
 import { MockMap } from "@/components/MockMap";
+import { StarRating, StarsText } from "@/components/StarRating";
 import type { Booking, PaymentMethod } from "@/lib/types";
 
 /** Mirrors the store's extendRide pricing: pro-rata on the current rate. */
@@ -39,6 +46,7 @@ export default function RidePage() {
   const bookings = useAppStore((s) => s.bookings);
   const vehicles = useAppStore((s) => s.vehicles);
   const operators = useAppStore((s) => s.operators);
+  const sites = useAppStore((s) => s.sites);
   const toggleMotor = useAppStore((s) => s.toggleMotor);
   const completeReturn = useAppStore((s) => s.completeReturn);
   const extendRide = useAppStore((s) => s.extendRide);
@@ -49,6 +57,7 @@ export default function RidePage() {
   const booking = bookings.find((b) => b.id === id);
   const vehicle = vehicles.find((v) => v.id === booking?.vehicleId);
   const op = operators.find((o) => o.id === booking?.operatorId);
+  const site = sites.find((x) => x.id === booking?.siteId);
 
   const [now, setNow] = useState(Date.now());
   const [sos, setSos] = useState(false);
@@ -59,6 +68,12 @@ export default function RidePage() {
   const [extendPaying, setExtendPaying] = useState(false);
   const [rating, setRating] = useState(5);
   const [reviewNote, setReviewNote] = useState("");
+  /** Rider GPS — demo starts "away" so return is blocked until in zone. */
+  const [riderPos, setRiderPos] = useState<{ lat: number; lng: number } | null>(
+    null,
+  );
+  const [locating, setLocating] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -113,25 +128,23 @@ export default function RidePage() {
             value={booking.paymentMethod.replace(/_/g, " ").toUpperCase()}
           />
           {booking.rating != null ? (
-            <Row label="Your rating" value={`${"★".repeat(booking.rating)}${"☆".repeat(5 - booking.rating)}`} />
+            <div className="flex items-center justify-between border-b border-dashed py-2.5 text-sm" style={{ borderColor: "var(--border)" }}>
+              <span style={{ color: "var(--text2)" }}>Your rating</span>
+              <StarsText value={booking.rating} />
+            </div>
           ) : null}
         </div>
 
         {needsReview ? (
           <div className="card">
             <div className="font-bold">How was your ride?</div>
-            <div className="mt-3 flex justify-center gap-2">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className="text-2xl"
-                  onClick={() => setRating(n)}
-                  style={{ opacity: n <= rating ? 1 : 0.35 }}
-                >
-                  ★
-                </button>
-              ))}
+            <div className="mt-3 flex justify-center">
+              <StarRating
+                value={rating}
+                size={32}
+                interactive
+                onChange={setRating}
+              />
             </div>
             <textarea
               className="mt-3 w-full rounded-xl border px-3 py-2 text-sm outline-none"
@@ -163,40 +176,191 @@ export default function RidePage() {
   }
 
   if (returnStep > 0) {
+    const zoneLat = site?.lat ?? op.lat;
+    const zoneLng = site?.lng ?? op.lng;
+    const zoneName = site?.name ?? op.name;
+    const pos = riderPos ?? { lat: USER_LAT, lng: USER_LNG };
+    const metersAway = distanceMeters(pos.lat, pos.lng, zoneLat, zoneLng);
+    const inZone = isInsideReturnGeofence(pos.lat, pos.lng, zoneLat, zoneLng);
+
+    function refreshGps() {
+      setLocating(true);
+      setGeoError(null);
+      if (!navigator.geolocation) {
+        setGeoError("GPS not available on this device — use demo buttons below.");
+        setLocating(false);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (p) => {
+          setRiderPos({ lat: p.coords.latitude, lng: p.coords.longitude });
+          setLocating(false);
+        },
+        () => {
+          setGeoError("Could not read GPS. Allow location, or use demo buttons.");
+          setLocating(false);
+        },
+        { enableHighAccuracy: true, timeout: 10_000 },
+      );
+    }
+
     return (
       <div>
         <Header title="Return" backHref={`/ride/${id}`} />
         {returnStep === 1 ? (
           <>
             <div
-              className="mx-4 rounded-xl border p-4 text-center text-sm"
-              style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
+              className="mx-4 rounded-xl border p-4 text-sm"
+              style={{
+                borderColor: inZone ? "var(--ok)" : "var(--warn)",
+                background: inZone ? "#E8F8F5" : "#FEF5E7",
+              }}
             >
-              Navigate back to {op.name} return zone (~50m).
+              <div className="flex items-start gap-2">
+                <MapPin
+                  size={20}
+                  className="mt-0.5 shrink-0"
+                  style={{ color: inZone ? "var(--ok)" : "#E65100" }}
+                />
+                <div>
+                  <div
+                    className="font-bold"
+                    style={{ color: inZone ? "var(--ok)" : "#E65100" }}
+                  >
+                    {inZone
+                      ? "You are in the return zone"
+                      : "Not at the return zone yet"}
+                  </div>
+                  <p className="mt-1" style={{ color: "var(--text2)" }}>
+                    Return only at <strong>{zoneName}</strong> (within{" "}
+                    {RETURN_GEOFENCE_M}m).{" "}
+                    {inZone
+                      ? "You can finish the return now."
+                      : `You are ${formatMetersAway(metersAway)} — ride closer to unlock return.`}
+                  </p>
+                </div>
+              </div>
             </div>
+
             <div className="mx-4 mt-3">
               <MockMap
                 height={160}
                 mapImage={op.mapImage}
-                label="OpenStreetMap · return zone"
-                userPin={{ top: "58%", left: "42%" }}
+                label={`Return zone · ${RETURN_GEOFENCE_M}m`}
+                userPin={{
+                  top: inZone ? "42%" : "68%",
+                  left: inZone ? "55%" : "32%",
+                }}
                 pins={[
                   {
                     id: "return",
-                    label: op.name,
+                    label: zoneName,
                     top: "38%",
                     left: "62%",
                   },
                 ]}
               />
             </div>
+
+            <div
+              className="mx-4 mt-3 flex items-center justify-between rounded-xl px-4 py-3 text-sm"
+              style={{ background: "var(--card)" }}
+            >
+              <span style={{ color: "var(--text2)" }}>Distance to hub</span>
+              <span
+                className="font-bold tabular-nums"
+                style={{ color: inZone ? "var(--ok)" : "var(--text)" }}
+              >
+                {formatMetersAway(metersAway)}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={locating}
+              onClick={refreshGps}
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <Navigation size={16} />
+                {locating ? "Checking GPS…" : "Check my location"}
+              </span>
+            </button>
+            {geoError ? (
+              <p
+                className="-mt-2 px-6 text-center text-xs"
+                style={{ color: "var(--warn)" }}
+              >
+                {geoError}
+              </p>
+            ) : null}
+
+            <div
+              className="mx-4 mt-1 rounded-xl border p-3 text-xs"
+              style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+            >
+              <div className="font-semibold" style={{ color: "var(--text2)" }}>
+                Demo (no real GPS needed)
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border py-2.5 font-bold"
+                  style={{
+                    borderColor: "var(--ok)",
+                    color: "var(--ok)",
+                    background: "#E8F8F5",
+                  }}
+                  onClick={() => {
+                    setRiderPos({ lat: zoneLat, lng: zoneLng });
+                    setGeoError(null);
+                    setToast("Demo: you are at the hub");
+                  }}
+                >
+                  Simulate at hub
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border py-2.5 font-bold"
+                  style={{
+                    borderColor: "var(--border)",
+                    color: "var(--text2)",
+                    background: "var(--card)",
+                  }}
+                  onClick={() => {
+                    setRiderPos({ lat: USER_LAT, lng: USER_LNG });
+                    setGeoError(null);
+                    setToast("Demo: you are away from hub");
+                  }}
+                >
+                  Simulate far away
+                </button>
+              </div>
+            </div>
+
             <button
               type="button"
               className="btn-primary"
-              onClick={() => setReturnStep(2)}
+              disabled={!inZone}
+              style={{ opacity: inZone ? 1 : 0.45 }}
+              onClick={() => {
+                if (!inZone) {
+                  setToast("Move into the return zone first");
+                  return;
+                }
+                setReturnStep(2);
+              }}
             >
-              I&apos;m at the return point
+              {inZone ? "I'm at the return point" : "Return locked — too far"}
             </button>
+            {!inZone ? (
+              <p
+                className="-mt-2 px-6 pb-2 text-center text-xs font-semibold"
+                style={{ color: "var(--warn)" }}
+              >
+                Geofence: return opens only within {RETURN_GEOFENCE_M}m of the hub
+              </p>
+            ) : null}
           </>
         ) : null}
         {returnStep === 2 ? (
@@ -435,7 +599,13 @@ export default function RidePage() {
       <button
         type="button"
         className="btn-danger"
-        onClick={() => setReturnStep(1)}
+        onClick={() => {
+          // Start outside the zone so return stays locked until GPS / demo puts them in.
+          if (!riderPos) {
+            setRiderPos({ lat: USER_LAT, lng: USER_LNG });
+          }
+          setReturnStep(1);
+        }}
       >
         End ride / return
       </button>

@@ -3,6 +3,15 @@
 All notable user-facing changes to Casan Rent are listed here.
 The same history appears in-app at **What's New** (`/updates`).
 
+## [0.4.6] — 2026-07-16
+
+### Rider
+- **Geofenced return**: must be within 80m of the hub; primary CTA stays locked when too far
+- Check GPS or use demo **Simulate at hub / far away**
+- Discovery simplified to **Bikes** + **Rental hubs**; map is a toggle on hubs; Saved tab removed
+- Listings sorted by nearest hub
+- Rating stars are yellow everywhere (review, receipt, hubs, history)
+
 ## [0.4.5] — 2026-07-16
 
 ### Rider

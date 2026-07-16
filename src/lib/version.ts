@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.5";
+export const APP_VERSION = "0.4.6";
 
 export interface ChangelogEntry {
   version: string;
@@ -9,6 +9,16 @@ export interface ChangelogEntry {
 
 /** Newest first — shown in What's New for riders and operators. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.4.6",
+    date: "2026-07-16",
+    title: "Geofenced return & simpler discovery",
+    highlights: [
+      "Return only unlocks inside an 80m hub geofence (GPS + demo simulate)",
+      "Discovery: Bikes + Rental hubs only; map is a toggle on hubs; Saved removed",
+      "Bike list sorted by nearest hub; yellow star ratings across the app",
+    ],
+  },
   {
     version: "0.4.5",
     date: "2026-07-16",

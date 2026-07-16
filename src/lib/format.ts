@@ -177,6 +177,33 @@ export function formatDistance(km: number): string {
   return `${km.toFixed(1)}km`;
 }
 
+/** Return allowed only within this radius of the hub (meters). */
+export const RETURN_GEOFENCE_M = 80;
+
+export function distanceMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  return haversineKm(lat1, lon1, lat2, lon2) * 1000;
+}
+
+export function isInsideReturnGeofence(
+  userLat: number,
+  userLng: number,
+  zoneLat: number,
+  zoneLng: number,
+  radiusM: number = RETURN_GEOFENCE_M,
+): boolean {
+  return distanceMeters(userLat, userLng, zoneLat, zoneLng) <= radiusM;
+}
+
+export function formatMetersAway(meters: number): string {
+  if (meters < 1000) return `${Math.round(meters)}m away`;
+  return `${(meters / 1000).toFixed(1)}km away`;
+}
+
 export function formatExtendLabel(minutes: number): string {
   if (minutes < 60) return `+${minutes} min`;
   if (minutes % (60 * 24 * 7) === 0) {

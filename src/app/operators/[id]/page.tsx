@@ -6,6 +6,8 @@ import { useParams } from "next/navigation";
 import { Header } from "@/components/Header";
 import { ContactActions } from "@/components/ContactActions";
 import { PhotoGallery } from "@/components/PhotoGallery";
+import { MockMap } from "@/components/MockMap";
+import { StarsText } from "@/components/StarRating";
 import { useAppStore } from "@/lib/store";
 import {
   formatDistance,
@@ -21,8 +23,6 @@ import {
   modelBatteryLabel,
   operatorRatingStats,
 } from "@/lib/catalog";
-import { Star } from "lucide-react";
-import { MockMap } from "@/components/MockMap";
 import type { OperatorReview } from "@/lib/types";
 
 const PAGE_SIZE = 5;
@@ -34,8 +34,6 @@ export default function OperatorDetailPage() {
   const vehicles = useAppStore((s) => s.vehicles);
   const bookings = useAppStore((s) => s.bookings);
   const reviews = useAppStore((s) => s.reviews);
-  const favorites = useAppStore((s) => s.favorites);
-  const toggleFavorite = useAppStore((s) => s.toggleFavorite);
   const op = operators.find((o) => o.id === id);
 
   const [page, setPage] = useState(0);
@@ -95,20 +93,6 @@ export default function OperatorDetailPage() {
         title={op.name}
         subtitle={`${op.city} · Rental station`}
         backHref="/home"
-        right={
-          <button
-            type="button"
-            className="flex h-9 w-9 items-center justify-center"
-            onClick={() => toggleFavorite(op.id)}
-            aria-label="Favorite operator"
-          >
-            <Star
-              size={18}
-              fill={favorites.includes(op.id) ? "#F4D03F" : "none"}
-              color="#F4D03F"
-            />
-          </button>
-        }
       />
 
       <div className="mx-4 mt-3 space-y-3">
@@ -160,13 +144,17 @@ export default function OperatorDetailPage() {
               </span>
               <span style={{ color: "var(--text2)" }}>{dist} away</span>
             </div>
-            <div
-              className="mt-2 text-sm font-semibold"
-              style={{ color: "var(--primary)" }}
-            >
-              {rating.count > 0
-                ? `★ ${rating.avg} · ${rating.count} reviews`
-                : "No reviews yet"}
+            <div className="mt-2 flex items-center gap-2 text-sm font-semibold">
+              {rating.count > 0 ? (
+                <>
+                  <StarsText value={rating.avg} />
+                  <span style={{ color: "var(--text2)" }}>
+                    {rating.avg} · {rating.count} reviews
+                  </span>
+                </>
+              ) : (
+                <span style={{ color: "var(--text2)" }}>No reviews yet</span>
+              )}
             </div>
           </div>
           <div className="text-center">
@@ -294,12 +282,7 @@ export default function OperatorDetailPage() {
             <div key={r.id} className="card">
               <div className="flex justify-between">
                 <div className="font-bold text-sm">{r.riderName}</div>
-                <div
-                  className="text-xs font-semibold"
-                  style={{ color: "var(--primary)" }}
-                >
-                  {"★".repeat(r.rating)}
-                </div>
+                <StarsText value={r.rating} />
               </div>
               <div className="mt-0.5 text-xs" style={{ color: "var(--text2)" }}>
                 {r.modelName}

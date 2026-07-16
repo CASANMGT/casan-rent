@@ -9,6 +9,7 @@ import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import { formatIdr } from "@/lib/format";
 import type { Booking } from "@/lib/types";
+import { StarsText } from "@/components/StarRating";
 
 export default function HistoryPage() {
   return (
@@ -146,7 +147,12 @@ function TripCard({ booking: b, name }: { booking: Booking; name: string }) {
       </div>
       <div className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
         {b.code} · {b.durationLabel} · {formatIdr(b.rentalPriceIdr)}
-        {b.rating != null ? ` · ${"★".repeat(b.rating)}` : ""}
+        {b.rating != null ? (
+          <>
+            {" · "}
+            <StarsText value={b.rating} />
+          </>
+        ) : null}
       </div>
     </>
   );

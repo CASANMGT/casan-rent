@@ -10,14 +10,13 @@ import {
   osmBrowseUrl,
   USER_LAT,
   USER_LNG,
-  vehicleTypeLabel,
 } from "@/lib/format";
 import { useAppStore } from "@/lib/store";
 import { BottomNav } from "@/components/BottomNav";
 import { AuthGate } from "@/components/AuthGate";
 import { useMemo, useState } from "react";
 import type { VehicleType } from "@/lib/types";
-import { Bell, Search, User } from "lucide-react";
+import { Bell, List, Map as MapIcon, Search, User } from "lucide-react";
 import {
   listAllModels,
   modelBatteryLabel,
@@ -25,7 +24,7 @@ import {
 } from "@/lib/catalog";
 import { MockMap } from "@/components/MockMap";
 
-type Tab = "map" | "operators" | "vehicles" | "saved";
+type Tab = "vehicles" | "operators";
 
 export default function RiderHomePage() {
   return (
@@ -40,10 +39,10 @@ function HomeInner() {
   const models = useAppStore((s) => s.models);
   const vehicles = useAppStore((s) => s.vehicles);
   const bookings = useAppStore((s) => s.bookings);
-  const favorites = useAppStore((s) => s.favorites);
   const notifications = useAppStore((s) => s.notifications);
   const reviews = useAppStore((s) => s.reviews);
   const [tab, setTab] = useState<Tab>("vehicles");
+  const [hubView, setHubView] = useState<"list" | "map">("list");
   const [typeFilter, setTypeFilter] = useState<VehicleType | "all">("all");
   const [query, setQuery] = useState("");
 
@@ -59,6 +58,13 @@ function HomeInner() {
   );
 
   const modelListings = useMemo(() => {
+    const distByOp = Object.fromEntries(
+      operators.map((o) => [
+        o.id,
+        haversineKm(USER_LAT, USER_LNG, o.lat, o.lng),
+      ]),
+    );
+    // Nearest hub first — new users read the list top-down by distance.
     return listAllModels(
       models,
       vehicles,
@@ -67,18 +73,11 @@ function HomeInner() {
       opNames,
     )
       .filter((m) => m.availableCount > 0)
-      .sort((a, b) => {
-        const aJ =
-          operators.find((o) => o.id === a.model.operatorId)?.city === "Jakarta"
-            ? 0
-            : 1;
-        const bJ =
-          operators.find((o) => o.id === b.model.operatorId)?.city === "Jakarta"
-            ? 0
-            : 1;
-        if (aJ !== bJ) return aJ - bJ;
-        return b.availableCount - a.availableCount;
-      });
+      .sort(
+        (a, b) =>
+          (distByOp[a.model.operatorId] ?? Infinity) -
+          (distByOp[b.model.operatorId] ?? Infinity),
+      );
   }, [models, vehicles, typeFilter, query, opNames, operators]);
 
   const opsFiltered = useMemo(() => {
@@ -97,11 +96,7 @@ function HomeInner() {
           rating,
         };
       })
-      .sort((a, b) => {
-        if (a.city === "Jakarta" && b.city !== "Jakarta") return -1;
-        if (b.city === "Jakarta" && a.city !== "Jakarta") return 1;
-        return a.dist - b.dist;
-      });
+      .sort((a, b) => a.dist - b.dist);
   }, [operators, vehicles, query, bookings, reviews]);
 
   return (
@@ -191,10 +186,8 @@ function HomeInner() {
       >
         {(
           [
-            ["map", "Map"],
-            ["operators", "Hubs"],
             ["vehicles", "Bikes"],
-            ["saved", "Saved"],
+            ["operators", "Rental hubs"],
           ] as [Tab, string][]
         ).map(([t, label]) => (
           <button
@@ -212,7 +205,7 @@ function HomeInner() {
         ))}
       </div>
 
-      {tab === "map" || tab === "vehicles" ? (
+      {tab === "vehicles" ? (
         <div className="mt-3 flex gap-2 overflow-x-auto px-4 pb-1">
           {(
             [
@@ -240,68 +233,76 @@ function HomeInner() {
         </div>
       ) : null}
 
-      {tab === "map" ? (
-        <div className="anim-fade-up">
-          <div className="relative mx-4 mt-3">
-            <MockMap
-              height={208}
-              mapImage={
-                opsFiltered.find((o) => o.city === "Jakarta")?.mapImage ??
-                "/maps/margonda.svg"
+      {tab === "operators" ? (
+        <div className="anim-fade-up mt-2">
+          <div className="mb-2 flex justify-end px-4">
+            <button
+              type="button"
+              className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold"
+              style={{
+                borderColor: "var(--border)",
+                background: "var(--card)",
+                color: "var(--primary)",
+              }}
+              onClick={() =>
+                setHubView((v) => (v === "list" ? "map" : "list"))
               }
-              label="OpenStreetMap · Jakarta kost"
-              userPin={{ top: "62%", left: "48%" }}
-              pins={opsFiltered
-                .filter((o) => o.city === "Jakarta")
-                .slice(0, 3)
-                .map((op, i) => ({
+            >
+              {hubView === "list" ? (
+                <>
+                  <MapIcon size={14} /> Show on map
+                </>
+              ) : (
+                <>
+                  <List size={14} /> Show list
+                </>
+              )}
+            </button>
+          </div>
+
+          {hubView === "map" ? (
+            <div className="relative mx-4 mb-3">
+              <MockMap
+                height={208}
+                mapImage={opsFiltered[0]?.mapImage ?? "/maps/margonda.svg"}
+                label="OpenStreetMap · hubs near you"
+                userPin={{ top: "62%", left: "48%" }}
+                pins={opsFiltered.slice(0, 3).map((op, i) => ({
                   id: op.id,
                   label: op.name,
                   top: `${28 + i * 18}%`,
                   left: `${20 + i * 22}%`,
                   href: `/operators/${op.id}`,
                 }))}
-            />
-            <a
-              href={osmBrowseUrl(
-                opsFiltered[0]?.lat ?? USER_LAT,
-                opsFiltered[0]?.lng ?? USER_LNG,
-              )}
-              target="_blank"
-              rel="noreferrer"
-              className="absolute bottom-3 right-3 z-20 rounded-full bg-white px-3 py-2 text-xs font-semibold shadow"
-            >
-              Open OSM
-            </a>
-          </div>
-          <p className="section-label">Nearby operators (Jakarta first)</p>
-          {opsFiltered.slice(0, 5).map((op) => (
-            <OperatorRow
-              key={op.id}
-              id={op.id}
-              emoji={op.emoji}
-              name={op.name}
-              address={`${op.city} · ${op.address}`}
-              meta={`${op.count} units · ${op.rating.count ? `★ ${op.rating.avg} · ${op.rating.count} reviews` : "New"} · ${op.supportsFrontDesk ? "Shop" : ""}${op.supportsFrontDesk && op.supportsSelfService ? " + " : ""}${op.supportsSelfService ? "Self-collect" : ""}`}
-              distance={formatDistance(op.dist)}
-            />
-          ))}
-        </div>
-      ) : null}
+              />
+              <a
+                href={osmBrowseUrl(
+                  opsFiltered[0]?.lat ?? USER_LAT,
+                  opsFiltered[0]?.lng ?? USER_LNG,
+                )}
+                target="_blank"
+                rel="noreferrer"
+                className="absolute bottom-3 right-3 z-20 rounded-full bg-white px-3 py-2 text-xs font-semibold shadow"
+              >
+                Open OSM
+              </a>
+            </div>
+          ) : null}
 
-      {tab === "operators" ? (
-        <div className="anim-fade-up mt-2">
-          {opsFiltered.map((op) => (
-            <OperatorRow
-              key={op.id}
-              id={op.id}
-              emoji={op.emoji}
-              name={op.name}
-              address={op.address}
-              meta={`${op.count} units available${op.rating.count ? ` · ★ ${op.rating.avg}` : ""}`}
-              distance={formatDistance(op.dist)}
-            />
-          ))}
+          {(hubView === "map" ? opsFiltered.slice(0, 5) : opsFiltered).map(
+            (op) => (
+              <OperatorRow
+                key={op.id}
+                id={op.id}
+                emoji={op.emoji}
+                name={op.name}
+                address={`${op.city} · ${op.address}`}
+                meta={`${op.count} bikes free`}
+                ratingAvg={op.rating.count ? op.rating.avg : null}
+                distance={formatDistance(op.dist)}
+              />
+            ),
+          )}
         </div>
       ) : null}
 
@@ -378,105 +379,6 @@ function HomeInner() {
         </div>
       ) : null}
 
-      {tab === "saved" ? (
-        <div className="anim-fade-up mt-2">
-          {favorites.length === 0 ? (
-            <div className="px-6 py-10 text-center">
-              <p className="text-sm" style={{ color: "var(--text2)" }}>
-                Nothing saved yet. Star a model or operator to find it here.
-              </p>
-              <button
-                type="button"
-                className="mt-3 text-sm font-bold"
-                style={{ color: "var(--primary)" }}
-                onClick={() => setTab("vehicles")}
-              >
-                Browse nearby bikes →
-              </button>
-            </div>
-          ) : null}
-          {favorites.map((id) => {
-            const model = models.find((x) => x.id === id);
-            const op = operators.find((x) => x.id === id);
-            if (model) {
-              return (
-                <Link
-                  key={id}
-                  href={`/models/${model.id}`}
-                  className="mx-4 mb-2.5 flex gap-3 rounded-2xl p-3.5"
-                  style={{ background: "var(--card)" }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={model.images[0]}
-                    alt=""
-                    className="h-14 w-16 rounded-lg object-cover"
-                  />
-                  <div>
-                    <div className="font-bold">{model.name}</div>
-                    <div className="text-xs" style={{ color: "var(--text2)" }}>
-                      Saved model · {vehicleTypeLabel(model.vehicleType)}
-                    </div>
-                  </div>
-                </Link>
-              );
-            }
-            if (op) {
-              return (
-                <Link
-                  key={id}
-                  href={`/operators/${op.id}`}
-                  className="mx-4 mb-2.5 flex gap-3 rounded-2xl p-3.5"
-                  style={{ background: "var(--card)" }}
-                >
-                  <div className="text-4xl">{op.emoji}</div>
-                  <div>
-                    <div className="font-bold">{op.name}</div>
-                    <div className="text-xs" style={{ color: "var(--text2)" }}>
-                      Saved operator
-                    </div>
-                  </div>
-                </Link>
-              );
-            }
-            return null;
-          })}
-        </div>
-      ) : null}
-
-      {tab === "map" ? (
-        <div className="mt-2">
-          <p className="section-label">Available nearby</p>
-          {modelListings.slice(0, 3).map(({ model, availableCount }) => {
-            const op = operators.find((o) => o.id === model.operatorId);
-            return (
-              <Link
-                key={model.id}
-                href={`/models/${model.id}`}
-                className="mx-4 mb-2.5 flex gap-3 rounded-2xl p-3.5"
-                style={{ background: "var(--card)" }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={model.images[0]}
-                  alt=""
-                  className="h-12 w-14 rounded-lg object-cover"
-                />
-                <div className="flex-1">
-                  <div className="font-bold text-sm">{model.name}</div>
-                  <div className="text-xs" style={{ color: "var(--text2)" }}>
-                    {availableCount} left · {op?.name}
-                  </div>
-                </div>
-                <div className="text-sm font-bold" style={{ color: "var(--primary)" }}>
-                  {formatIdrShort(model.pricePerHour)}
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      ) : null}
-
       <BottomNav variant="rider" />
     </div>
   );
@@ -489,6 +391,7 @@ function OperatorRow({
   address,
   meta,
   distance,
+  ratingAvg,
 }: {
   id: string;
   emoji: string;
@@ -496,6 +399,7 @@ function OperatorRow({
   address: string;
   meta: string;
   distance: string;
+  ratingAvg?: number | null;
 }) {
   return (
     <Link
@@ -516,8 +420,13 @@ function OperatorRow({
         <div className="text-xs" style={{ color: "var(--text2)" }}>
           {address}
         </div>
-        <div className="mt-1 text-xs font-semibold" style={{ color: "var(--primary)" }}>
-          {meta}
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+          <span style={{ color: "var(--primary)" }}>{meta}</span>
+          {ratingAvg != null ? (
+            <span className="inline-flex items-center gap-0.5" style={{ color: "#F4D03F" }}>
+              ★ {ratingAvg}
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="text-right text-xs" style={{ color: "var(--text2)" }}>

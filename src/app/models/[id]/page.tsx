@@ -15,7 +15,6 @@ import {
   vehicleTypeLabel,
 } from "@/lib/format";
 import type { PickupType } from "@/lib/types";
-import { Star } from "lucide-react";
 import { PhotoGallery } from "@/components/PhotoGallery";
 import { ContactActions } from "@/components/ContactActions";
 import { MockMap } from "@/components/MockMap";
@@ -35,11 +34,9 @@ export default function ModelDetailPage() {
   const vehicles = useAppStore((s) => s.vehicles);
   const operators = useAppStore((s) => s.operators);
   const pricing = useAppStore((s) => s.pricing);
-  const favorites = useAppStore((s) => s.favorites);
   const reviews = useAppStore((s) => s.reviews);
   const bookings = useAppStore((s) => s.bookings);
   const chargingAddons = useAppStore((s) => s.chargingAddons);
-  const toggleFavorite = useAppStore((s) => s.toggleFavorite);
   const createBooking = useAppStore((s) => s.createBooking);
   const setToast = useAppStore((s) => s.setToast);
 
@@ -130,17 +127,6 @@ export default function ModelDetailPage() {
         >
           ‹
         </button>
-        <button
-          type="button"
-          className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-black/35"
-          onClick={() => toggleFavorite(model.id)}
-        >
-          <Star
-            size={18}
-            fill={favorites.includes(model.id) ? "#F4D03F" : "none"}
-            color="#F4D03F"
-          />
-        </button>
         <div className="absolute bottom-3 left-4 right-4 flex justify-between text-white drop-shadow">
           <div>
             <div className="font-display text-xl font-semibold">{model.name}</div>
@@ -160,9 +146,14 @@ export default function ModelDetailPage() {
           <div>
             <div className="font-bold text-sm">{op.name}</div>
             <div className="text-xs" style={{ color: "var(--text2)" }}>
-              {rating.count > 0
-                ? `★ ${rating.avg} · ${rating.count} reviews`
-                : "New operator"}
+              {rating.count > 0 ? (
+                <>
+                  <span style={{ color: "#F4D03F" }}>★</span> {rating.avg} ·{" "}
+                  {rating.count} reviews
+                </>
+              ) : (
+                "New operator"
+              )}
               {op.city ? ` · ${op.city}` : ""}
             </div>
           </div>
