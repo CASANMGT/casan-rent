@@ -1,0 +1,29 @@
+---
+description: Always update docs/PRD.md when shipping a new app version
+alwaysApply: true
+---
+
+# PRD must track every product version
+
+Whenever the app version changes (`src/lib/version.ts` `APP_VERSION`, `package.json` `version`, and `CHANGELOG`), **also update `docs/PRD.md` in the same change set**.
+
+## Required PRD updates on each version bump
+
+1. **Header table** — set **Status** / product version / date to the new `APP_VERSION`.
+2. **Document history** — add a row for this version (what shipped that affects product requirements).
+3. **Requirements / glossary / rules / routes / roadmap** — update any section that the release changed (do not leave the PRD describing old UX or obsolete rules).
+4. **Shipped roadmap** — move completed items into “Shipped” with the version id.
+
+## Do not
+
+- Ship or commit a version bump without a corresponding PRD edit.
+- Treat `docs/PRD.md` as a one-time artifact; it is living product truth.
+
+## Version pairing
+
+| Artifact | Must match |
+|----------|------------|
+| `APP_VERSION` in `src/lib/version.ts` | Product version in PRD header |
+| `package.json` version | Same |
+| `CHANGELOG[0]` | Summarized in PRD history + shipped notes |
+| UX audit canvas (optional but recommended) | Rescore fixed vs open findings for the new version |

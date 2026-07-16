@@ -60,6 +60,7 @@ const PAST_STATUSES = ["completed", "cancelled"] as const;
 function HistoryInner() {
   const bookings = useAppStore((s) => s.bookings);
   const vehicles = useAppStore((s) => s.vehicles);
+  const sites = useAppStore((s) => s.sites);
   const [showPast, setShowPast] = useState(false);
 
   const { ongoing, past } = useMemo(() => {
@@ -79,6 +80,8 @@ function HistoryInner() {
 
   const vehicleName = (b: Booking) =>
     vehicles.find((x) => x.id === b.vehicleId)?.name ?? "Vehicle";
+  const hubName = (b: Booking) =>
+    sites.find((s) => s.id === b.siteId)?.name ?? null;
 
   return (
     <div className="content-pad">
@@ -108,7 +111,12 @@ function HistoryInner() {
             </p>
           ) : (
             ongoing.map((b) => (
-              <TripCard key={b.id} booking={b} name={vehicleName(b)} />
+              <TripCard
+                key={b.id}
+                booking={b}
+                name={vehicleName(b)}
+                hub={hubName(b)}
+              />
             ))
           )}
 
@@ -133,7 +141,12 @@ function HistoryInner() {
               </button>
               {showPast
                 ? past.map((b) => (
-                    <TripCard key={b.id} booking={b} name={vehicleName(b)} />
+                    <TripCard
+                      key={b.id}
+                      booking={b}
+                      name={vehicleName(b)}
+                      hub={hubName(b)}
+                    />
                   ))
                 : null}
             </>
@@ -145,9 +158,26 @@ function HistoryInner() {
   );
 }
 
-function TripCard({ booking: b, name }: { booking: Booking; name: string }) {
+function TripCard({
+  booking: b,
+  name,
+  hub,
+}: {
+  booking: Booking;
+  name: string;
+  hub: string | null;
+}) {
   const href = tripHref(b.status, b.paymentStatus, b.id);
   const label = tripStatusLabel(b.status, b.paymentStatus);
+  const when = b.appointmentAt
+    ? new Date(b.appointmentAt).toLocaleString("id-ID", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
   const inner = (
     <>
       <div className="flex justify-between gap-3">
@@ -170,7 +200,9 @@ function TripCard({ booking: b, name }: { booking: Booking; name: string }) {
         </div>
       </div>
       <div className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
+        {hub ? `${hub} · ` : ""}
         {b.code} · {b.durationLabel} · {formatIdr(b.rentalPriceIdr)}
+        {when ? ` · ${when}` : ""}
         {b.rating != null ? (
           <>
             {" · "}

@@ -105,6 +105,8 @@ function HomeInner() {
 
   const freeNearby = hubs.reduce((s, h) => s + h.availableCount, 0);
   const nearestHub = hubs[0];
+  const needPaySite = sites.find((s) => s.id === needPay?.siteId);
+  const readySite = sites.find((s) => s.id === readyCollect?.siteId);
 
   return (
     <div className="content-pad">
@@ -209,8 +211,20 @@ function HomeInner() {
               Pay to continue
             </div>
             <div className="text-xs" style={{ color: "var(--text2)" }}>
-              {needPay.code} · {needPay.durationLabel} ·{" "}
+              {needPaySite?.name ?? needPay.code}
+              {" · "}
+              {needPay.durationLabel}
+              {" · "}
               {formatIdrShort(needPay.rentalPriceIdr)}
+              {needPay.appointmentAt
+                ? ` · ${new Date(needPay.appointmentAt).toLocaleString("id-ID", {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : ""}
             </div>
           </div>
           <span className="text-xs font-bold" style={{ color: "var(--primary)" }}>
@@ -231,7 +245,7 @@ function HomeInner() {
               Ready to collect
             </div>
             <div className="text-xs" style={{ color: "var(--text2)" }}>
-              {readyCollect.code}
+              {readySite?.name ?? readyCollect.code}
               {readyCollect.appointmentAt
                 ? ` · ${new Date(readyCollect.appointmentAt).toLocaleString("id-ID", {
                     weekday: "short",
@@ -358,7 +372,11 @@ function HomeInner() {
                   nearestHub?.operator.mapImage ??
                   "/maps/margonda.svg"
                 }
-                label="OpenStreetMap · hubs near you"
+                label="Approximate map · demo"
+                directionsHref={osmBrowseUrl(
+                  nearestHub?.site.lat ?? USER_LAT,
+                  nearestHub?.site.lng ?? USER_LNG,
+                )}
                 userPin={{ top: "62%", left: "48%" }}
                 pins={hubs.slice(0, 5).map((h, i) => ({
                   id: h.site.id,
@@ -368,17 +386,6 @@ function HomeInner() {
                   href: `/operators/${h.operator.id}?site=${h.site.id}`,
                 }))}
               />
-              <a
-                href={osmBrowseUrl(
-                  nearestHub?.site.lat ?? USER_LAT,
-                  nearestHub?.site.lng ?? USER_LNG,
-                )}
-                target="_blank"
-                rel="noreferrer"
-                className="absolute bottom-3 right-3 z-20 rounded-full bg-white px-3 py-2 text-xs font-semibold shadow"
-              >
-                Open OSM
-              </a>
             </div>
           ) : null}
 

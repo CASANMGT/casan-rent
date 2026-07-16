@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
 import { AreaBadge, OpSection } from "@/components/operator/OperatorUi";
+import { LocationSwitcher } from "@/components/operator/FleetModelStock";
 import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import {
@@ -78,6 +79,8 @@ function EarningsInner() {
   const operators = useAppStore((s) => s.operators);
   const vehicles = useAppStore((s) => s.vehicles);
   const sites = useAppStore((s) => s.sites);
+  const operatorActiveSiteId = useAppStore((s) => s.operatorActiveSiteId);
+  const setOperatorActiveSiteId = useAppStore((s) => s.setOperatorActiveSiteId);
   const [period, setPeriod] = useState<Period>("week");
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -86,10 +89,16 @@ function EarningsInner() {
   const cutoff = startOfPeriod(period);
   const prev = prevPeriodRange(period);
 
-  const opBookings = useMemo(
-    () => bookings.filter((b) => b.operatorId === user.operatorId),
-    [bookings, user.operatorId],
+  const opSites = useMemo(
+    () => sites.filter((s) => s.operatorId === user.operatorId),
+    [sites, user.operatorId],
   );
+
+  const opBookings = useMemo(() => {
+    const all = bookings.filter((b) => b.operatorId === user.operatorId);
+    if (!operatorActiveSiteId) return all;
+    return all.filter((b) => b.siteId === operatorActiveSiteId);
+  }, [bookings, user.operatorId, operatorActiveSiteId]);
 
   const mine = useMemo(
     () =>
@@ -278,8 +287,37 @@ function EarningsInner() {
         )}
       </div>
 
+      {opSites.length > 1 ? (
+        <div className="mt-3">
+          <p
+            className="mb-1 px-4 text-[11px] font-bold uppercase tracking-wide"
+            style={{ color: "var(--text2)" }}
+          >
+            Lokasi
+          </p>
+          <LocationSwitcher
+            locations={opSites.map((s) => ({
+              id: s.id,
+              name: s.name.replace(/\s+(Lobby|Hub|Corner|Desk|Counter)$/i, ""),
+              total: vehicles.filter(
+                (v) => v.operatorId === user.operatorId && v.siteId === s.id,
+              ).length,
+            }))}
+            value={operatorActiveSiteId ?? "all"}
+            onChange={(id) =>
+              setOperatorActiveSiteId(id === "all" ? null : id)
+            }
+            unassignedCount={0}
+            showUnassigned={false}
+            showAll
+          />
+        </div>
+      ) : null}
+
       <div
-        className="mx-4 -mt-3 flex gap-1 rounded-xl p-1 shadow-sm"
+        className={`mx-4 flex gap-1 rounded-xl p-1 shadow-sm ${
+          opSites.length > 1 ? "mt-3" : "-mt-3"
+        }`}
         style={{ background: "var(--card)" }}
       >
         {(

@@ -295,7 +295,12 @@ function OperatorDetailInner() {
         <MockMap
           height={150}
           mapImage={activeSite?.mapImage || op.mapImage}
-          label={`Map · ${activeSite?.name ?? op.name}`}
+          label={`Approximate map · ${activeSite?.name ?? op.name}`}
+          directionsHref={
+            activeSite
+              ? osmBrowseUrl(activeSite.lat, activeSite.lng)
+              : osmBrowseUrl(op.lat, op.lng)
+          }
           userPin={{ top: "70%", left: "35%" }}
           pins={[
             {

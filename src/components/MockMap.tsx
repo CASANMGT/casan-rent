@@ -5,8 +5,9 @@ export function MockMap({
   pins = [],
   userPin,
   height = 180,
-  label = "OpenStreetMap",
+  label = "Approximate map · demo",
   mapImage,
+  directionsHref,
 }: {
   pins?: { id: string; label: string; top: string; left: string; href?: string }[];
   userPin?: { top: string; left: string };
@@ -14,6 +15,8 @@ export function MockMap({
   label?: string;
   /** Bundled OSM static screenshot, e.g. /maps/margonda.svg */
   mapImage?: string;
+  /** Real navigation — prefer this over trusting pin positions. */
+  directionsHref?: string;
 }) {
   return (
     <div
@@ -63,20 +66,20 @@ export function MockMap({
           <a
             key={p.id}
             href={p.href}
-            className="absolute z-10 flex h-9 w-9 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full text-sm font-bold text-white shadow"
+            className="absolute z-10 flex h-9 w-9 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full text-sm font-bold text-white"
             style={{ top: p.top, left: p.left, background: "var(--primary)" }}
             title={p.label}
           >
-            📍
+            ·
           </a>
         ) : (
           <div
             key={p.id}
-            className="absolute z-10 flex h-9 w-9 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full text-sm font-bold text-white shadow"
+            className="absolute z-10 flex h-9 w-9 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full text-sm font-bold text-white"
             style={{ top: p.top, left: p.left, background: "var(--primary)" }}
             title={p.label}
           >
-            📍
+            ·
           </div>
         ),
       )}
@@ -90,15 +93,28 @@ export function MockMap({
             background: "var(--digital)",
             boxShadow: "0 0 0 4px rgba(40,116,166,0.25)",
           }}
-          title="You"
+          title="You (approximate)"
         />
       ) : null}
 
-      <div
-        className="absolute bottom-2 left-2 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-semibold"
-        style={{ color: "var(--text2)" }}
-      >
-        {label}
+      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
+        <div
+          className="rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold"
+          style={{ color: "var(--text2)" }}
+        >
+          {label}
+        </div>
+        {directionsHref ? (
+          <a
+            href={directionsHref}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-full px-2.5 py-1 text-[10px] font-bold text-white"
+            style={{ background: "var(--primary)" }}
+          >
+            Directions (OSM)
+          </a>
+        ) : null}
       </div>
     </div>
   );

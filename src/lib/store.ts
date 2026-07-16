@@ -131,6 +131,8 @@ interface AppState {
   setPaymentMethod: (bookingId: string, method: PaymentMethod) => void;
   confirmBooking: (bookingId: string) => void;
   declineBooking: (bookingId: string) => void;
+  /** Rider cancels an unpaid booking; releases assigned unit. */
+  cancelBooking: (bookingId: string) => void;
   confirmBulk: (ids: string[]) => void;
   payBooking: (bookingId: string) => void;
   startRide: (bookingId: string) => void;
@@ -460,10 +462,44 @@ export const useAppStore = create<AppState>()(
                     body: `${booking.code} was declined by the operator. Deposit will not be charged.`,
                     read: false,
                     createdAt: new Date().toISOString(),
+                    href: "/history",
+                    bookingId: booking.id,
                   },
                   ...s.notifications,
                 ]
               : s.notifications,
+          };
+        }),
+
+      cancelBooking: (bookingId) =>
+        set((s) => {
+          const booking = s.bookings.find((b) => b.id === bookingId);
+          if (!booking || booking.paymentStatus === "paid") return s;
+          if (["active", "overdue", "completed", "cancelled"].includes(booking.status)) {
+            return s;
+          }
+          return {
+            bookings: s.bookings.map((b) =>
+              b.id === bookingId ? { ...b, status: "cancelled" as const } : b,
+            ),
+            vehicles: s.vehicles.map((v) =>
+              v.id === booking.vehicleId
+                ? { ...v, status: "available" as VehicleStatus }
+                : v,
+            ),
+            notifications: [
+              {
+                id: `n-cancel-${booking.id}-${Date.now()}`,
+                title: "Booking cancelled",
+                body: `${booking.code} cancelled. The unit is free again.`,
+                read: false,
+                createdAt: new Date().toISOString(),
+                href: "/history",
+                bookingId: booking.id,
+              },
+              ...s.notifications,
+            ],
+            toast: "Booking cancelled",
           };
         }),
 

@@ -22,7 +22,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Docs
 
-- [Product requirements (v1.1)](docs/PRD.md)
+- [Product requirements](docs/PRD.md) — living PRD; **update on every app version**
 - [Architecture](docs/ARCHITECTURE.md)
 
 ## Stack

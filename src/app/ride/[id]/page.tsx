@@ -18,6 +18,7 @@ import {
   RETURN_GEOFENCE_M,
   USER_LAT,
   USER_LNG,
+  osmBrowseUrl,
 } from "@/lib/format";
 import { CalendarClock, MapPin, Navigation } from "lucide-react";
 import { MockMap } from "@/components/MockMap";
@@ -260,7 +261,8 @@ function RideInner() {
               <MockMap
                 height={160}
                 mapImage={op.mapImage}
-                label={`Return zone · ${RETURN_GEOFENCE_M}m`}
+                label={`Approximate return zone · ${RETURN_GEOFENCE_M}m`}
+                directionsHref={osmBrowseUrl(zoneLat, zoneLng)}
                 userPin={{
                   top: inZone ? "42%" : "68%",
                   left: inZone ? "55%" : "32%",
@@ -896,7 +898,10 @@ function RideInner() {
           >
             <div className="font-display text-lg font-semibold">Emergency</div>
             <p className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
-              Location shared (mock): {op.lat.toFixed(4)}, {op.lng.toFixed(4)}
+              Location shared:{" "}
+              {(riderPos ?? { lat: USER_LAT, lng: USER_LNG }).lat.toFixed(4)},{" "}
+              {(riderPos ?? { lat: USER_LAT, lng: USER_LNG }).lng.toFixed(4)}
+              {riderPos ? " (your GPS)" : " (approx · enable GPS for exact)"}
             </p>
             <a className="btn-primary !mx-0 !w-full" href="tel:118">
               Call ambulance (118)

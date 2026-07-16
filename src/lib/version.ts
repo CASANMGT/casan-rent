@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.8";
+export const APP_VERSION = "0.4.9";
 
 export interface ChangelogEntry {
   version: string;
@@ -9,6 +9,16 @@ export interface ChangelogEntry {
 
 /** Newest first — shown in What's New for riders and operators. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.4.9",
+    date: "2026-07-16",
+    title: "UX P2: honest maps, check-in, Orders badge",
+    highlights: [
+      "Maps labeled Approximate (demo) with OSM Directions; check-in is Unlock unit (no fake QR)",
+      "Orders nav badge for pending/overdue/cash/keys; Home & Trips show hub + appointment",
+      "SOS shares rider GPS; Earnings lokasi filter; cancel unpaid booking; demo checkout gated",
+    ],
+  },
   {
     version: "0.4.8",
     date: "2026-07-16",

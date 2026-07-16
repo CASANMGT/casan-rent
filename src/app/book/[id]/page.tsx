@@ -7,6 +7,7 @@ import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import { formatIdr, formatOrderDateTime } from "@/lib/format";
 import type { PaymentMethod } from "@/lib/types";
+import { IS_DEMO } from "@/lib/demo";
 
 const methods: { id: PaymentMethod; name: string; desc: string }[] = [
   { id: "qris", name: "QRIS", desc: "Scan any Indonesian QRIS" },
@@ -33,11 +34,14 @@ function BookPaymentInner() {
   const operators = useAppStore((s) => s.operators);
   const payBooking = useAppStore((s) => s.payBooking);
   const setPaymentMethod = useAppStore((s) => s.setPaymentMethod);
+  const cancelBooking = useAppStore((s) => s.cancelBooking);
   const setToast = useAppStore((s) => s.setToast);
+  const sites = useAppStore((s) => s.sites);
 
   const booking = bookings.find((b) => b.id === id);
   const vehicle = vehicles.find((v) => v.id === booking?.vehicleId);
   const op = operators.find((o) => o.id === booking?.operatorId);
+  const site = sites.find((s) => s.id === booking?.siteId);
 
   const [method, setMethod] = useState<PaymentMethod>(
     booking?.paymentMethod === "pay_at_operator" &&
@@ -101,7 +105,7 @@ function BookPaymentInner() {
     <div className="content-pad">
       <Header
         title="Payment"
-        subtitle="Demo checkout"
+        subtitle={IS_DEMO ? "Demo checkout — no real charge" : undefined}
         backHref={
           booking.siteId
             ? `/models/${booking.modelId}?site=${booking.siteId}`
@@ -111,7 +115,7 @@ function BookPaymentInner() {
       <div className="card">
         <div className="font-bold">{vehicle.name}</div>
         <div className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
-          {op.name} · {booking.durationLabel}
+          {site?.name ?? op.name} · {booking.durationLabel}
         </div>
         <div className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
           Pickup:{" "}
@@ -179,9 +183,11 @@ function BookPaymentInner() {
       ))}
       </div>
 
-      <p className="mx-4 mt-2 text-center text-xs" style={{ color: "var(--text2)" }}>
-        Payments are mocked via /api/payment — no real charge.
-      </p>
+      {IS_DEMO ? (
+        <p className="mx-4 mt-2 text-center text-xs" style={{ color: "var(--text2)" }}>
+          Demo mode: payments are mocked via /api/payment — no real charge.
+        </p>
+      ) : null}
 
       <button
         type="button"
@@ -195,6 +201,21 @@ function BookPaymentInner() {
             ? "Reserve · pay at pickup"
             : `Pay ${formatIdr(total)}`}
       </button>
+
+      {booking.paymentStatus === "pending" &&
+      !["active", "overdue", "completed", "cancelled"].includes(booking.status) ? (
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={loading}
+          onClick={() => {
+            cancelBooking(booking.id);
+            router.push("/history");
+          }}
+        >
+          Cancel booking
+        </button>
+      ) : null}
     </div>
   );
 }
