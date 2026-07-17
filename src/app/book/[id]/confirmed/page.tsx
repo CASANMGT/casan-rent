@@ -13,6 +13,7 @@ import {
   osmBrowseUrl,
 } from "@/lib/format";
 import { IS_DEMO } from "@/lib/demo";
+import { CollectWindow } from "@/components/UxSignals";
 
 export default function BookingConfirmedPage() {
   return (
@@ -127,6 +128,10 @@ function BookingConfirmedInner() {
           via {booking.paymentMethod.replace(/_/g, " ")}
         </div>
       </div>
+
+      {(ready || payAtCounter) && !booking.startsAt ? (
+        <CollectWindow booking={booking} />
+      ) : null}
 
       {(booking.addons ?? []).length > 0 ? (
         <div className="card">

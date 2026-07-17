@@ -17,6 +17,15 @@
   --ok: #1e8449;
   --digital: #2874a6;
   --key: #7d3c98;
+  --text-warn: #8a5200;
+  --neutral: #5f6b66;
+  --success-soft: #e8f8f2;
+  --warning-soft: #fff4dc;
+  --danger-soft: #fbe9e7;
+  --info-soft: #e8f3f8;
+  --neutral-soft: #edf1ef;
+  --digital-soft: #e8f3f8;
+  --key-soft: #f3eafb;
   --shadow: 0 8px 28px rgba(8, 61, 54, 0.08);
 }
 
@@ -54,6 +63,15 @@ body.dark {
   --text: #e6f0ec;
   --text2: #8aada4;
   --border: #2a443c;
+  --text-warn: #f3bd68;
+  --neutral: #a7b8b1;
+  --success-soft: #14372c;
+  --warning-soft: #3b2c12;
+  --danger-soft: #3b211f;
+  --info-soft: #18313d;
+  --neutral-soft: #22322d;
+  --digital-soft: #18313d;
+  --key-soft: #30233c;
   background:
     radial-gradient(ellipse 70% 40% at 0% 0%, #14352e 0%, transparent 50%),
     #0b1815;

@@ -191,6 +191,35 @@ export function formatDistance(km: number): string {
   return `${km.toFixed(1)}km`;
 }
 
+/** Walking estimate at a conservative urban pace (~72 m/min). Beyond a 60-minute walk, show distance only. */
+export function formatWalkEta(km: number): string {
+  const meters = Math.max(0, Math.round(km * 1000));
+  const minutes = Math.max(1, Math.ceil(meters / 72));
+  if (minutes > 60) return formatDistance(km);
+  return `${minutes} min walk · ${formatDistance(km)}`;
+}
+
+export function relativeAge(
+  value: string | number | Date,
+  nowMs: number = Date.now(),
+): { label: string; minutes: number; tone: "fresh" | "warn" | "danger" } {
+  const timestamp = new Date(value).getTime();
+  const minutes = Number.isFinite(timestamp)
+    ? Math.max(0, Math.floor((nowMs - timestamp) / 60_000))
+    : 0;
+  const label =
+    minutes < 1
+      ? "Just now"
+      : minutes === 1
+        ? "1 min ago"
+        : `${minutes} min ago`;
+  return {
+    label,
+    minutes,
+    tone: minutes >= 10 ? "danger" : minutes >= 5 ? "warn" : "fresh",
+  };
+}
+
 /** Return allowed only within this radius of the hub (meters). */
 export const RETURN_GEOFENCE_M = 80;
 

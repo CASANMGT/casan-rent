@@ -27,6 +27,7 @@ import { ContactActions } from "@/components/ContactActions";
 import { AuthGate } from "@/components/AuthGate";
 import type { Booking, PaymentMethod } from "@/lib/types";
 import { IS_DEMO } from "@/lib/demo";
+import { GpsFreshness } from "@/components/UxSignals";
 
 /** Mirrors the store's extendRide pricing: pro-rata on the current rate. */
 function extendPriceFor(booking: Booking, extraMinutes: number): number {
@@ -71,7 +72,7 @@ function RideInner() {
   const op = operators.find((o) => o.id === booking?.operatorId);
   const site = sites.find((x) => x.id === booking?.siteId);
 
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(0);
   const [sos, setSos] = useState(false);
   const [returnStep, setReturnStep] = useState(0);
   const [extendOpen, setExtendOpen] = useState(false);
@@ -87,10 +88,16 @@ function RideInner() {
   );
   const [locating, setLocating] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
+  const [gpsUpdatedAt, setGpsUpdatedAt] = useState<number | null>(null);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    const update = () => setNow(Date.now());
+    const first = window.setTimeout(update, 0);
+    const timer = window.setInterval(update, 1000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+    };
   }, []);
 
   const remainingSec = useMemo(() => {
@@ -209,6 +216,7 @@ function RideInner() {
       navigator.geolocation.getCurrentPosition(
         (p) => {
           setRiderPos({ lat: p.coords.latitude, lng: p.coords.longitude });
+          setGpsUpdatedAt(now);
           setLocating(false);
         },
         () => {
@@ -282,7 +290,16 @@ function RideInner() {
               className="mx-4 mt-3 flex items-center justify-between rounded-xl px-4 py-3 text-sm"
               style={{ background: "var(--card)" }}
             >
-              <span style={{ color: "var(--text2)" }}>Distance to hub</span>
+              <div>
+                <div style={{ color: "var(--text2)" }}>Distance to hub</div>
+                <div className="mt-0.5 text-[10px]" style={{ color: "var(--text2)" }}>
+                  <GpsFreshness
+                    updatedAt={gpsUpdatedAt}
+                    label="Your location"
+                    mock={!gpsUpdatedAt}
+                  />
+                </div>
+              </div>
               <span
                 className="font-bold tabular-nums"
                 style={{ color: inZone ? "var(--ok)" : "var(--text)" }}
@@ -330,6 +347,7 @@ function RideInner() {
                   }}
                   onClick={() => {
                     setRiderPos({ lat: zoneLat, lng: zoneLng });
+                    setGpsUpdatedAt(now);
                     setGeoError(null);
                     setToast("Demo: you are at the hub");
                   }}
@@ -346,6 +364,7 @@ function RideInner() {
                   }}
                   onClick={() => {
                     setRiderPos({ lat: USER_LAT, lng: USER_LNG });
+                    setGpsUpdatedAt(now);
                     setGeoError(null);
                     setToast("Demo: you are away from hub");
                   }}
@@ -624,6 +643,9 @@ function RideInner() {
           label="Keys"
         />
         <Stat value={site?.name ?? op.name} label="Hub" />
+      </div>
+      <div className="-mt-1 mb-3 px-4 text-center text-[10px]" style={{ color: "var(--text2)" }}>
+        <GpsFreshness label="Bike GPS" mock />
       </div>
 
       {(booking.rentalMode === "digital" || booking.keysAccess === "both") &&

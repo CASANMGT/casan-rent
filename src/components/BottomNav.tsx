@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { OP } from "@/lib/operator-ui";
 import { useAppStore } from "@/lib/store";
+import { canAccessSite, getCurrentStaff } from "@/lib/permissions";
 
 const riderItems = [
   { href: "/home", label: "Home", icon: Bike },
@@ -48,12 +49,15 @@ export function BottomNav({ variant }: { variant: "rider" | "operator" }) {
   const items: NavItem[] = variant === "rider" ? riderItems : [...operatorItems];
   const user = useAppStore((s) => s.user);
   const bookings = useAppStore((s) => s.bookings);
+  const staff = useAppStore((s) => s.staff);
   const siteFilter = useAppStore((s) => s.operatorActiveSiteId);
+  const currentStaff = getCurrentStaff(user, staff);
 
   const ordersBadge =
     variant === "operator" && user.operatorId
       ? bookings.filter((b) => {
           if (b.operatorId !== user.operatorId) return false;
+          if (!canAccessSite(currentStaff, b.siteId)) return false;
           if (siteFilter && b.siteId !== siteFilter) return false;
           const pendingQueue = ["pending", "confirmed", "awaiting_pickup"].includes(
             b.status,

@@ -9,6 +9,7 @@ import { useAppStore } from "@/lib/store";
 import { batteryPctLabel, keysAccessLabel } from "@/lib/format";
 import { modelBatteryLabel } from "@/lib/catalog";
 import { IS_DEMO } from "@/lib/demo";
+import { CollectWindow } from "@/components/UxSignals";
 
 export default function HandoverPage() {
   return (
@@ -59,6 +60,7 @@ function HandoverInner() {
         title={dual ? "Key handover + app" : "Key handover"}
         backHref={`/book/${id}/confirmed`}
       />
+      {!booking.startsAt ? <CollectWindow booking={booking} /> : null}
       <div className="card text-center">
         <div className="text-5xl">{vehicle.emoji}</div>
         <div className="mt-3 font-bold">{vehicle.name}</div>

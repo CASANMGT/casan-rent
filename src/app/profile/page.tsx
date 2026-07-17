@@ -27,6 +27,7 @@ function ProfileInner() {
   const resetDemo = useAppStore((s) => s.resetDemo);
   const setToast = useAppStore((s) => s.setToast);
   const lastSeenVersion = useAppStore((s) => s.lastSeenVersion);
+  const showRiderGuide = useAppStore((s) => s.showRiderGuide);
   const unseen = hasUnseenUpdates(lastSeenVersion);
 
   return (
@@ -68,6 +69,23 @@ function ProfileInner() {
           <span style={{ color: "var(--text2)" }}>→</span>
         )}
       </Link>
+
+      <button
+        type="button"
+        className="card flex w-[calc(100%-32px)] items-center justify-between text-left font-semibold"
+        onClick={() => {
+          showRiderGuide("safety");
+          router.push("/home");
+        }}
+      >
+        <span>
+          Safety & local riding tips
+          <span className="mt-0.5 block text-xs font-normal" style={{ color: "var(--text2)" }}>
+            City-aware advice for Bali and Jakarta
+          </span>
+        </span>
+        <span style={{ color: "var(--text2)" }}>→</span>
+      </button>
 
       <div className="card flex items-center justify-between">
         <span className="font-semibold">Dark mode</span>

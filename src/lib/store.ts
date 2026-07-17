@@ -39,6 +39,13 @@ import { bookingCode, formatIdr, formatReturnBy, siteOpenClose } from "./format"
 import { IS_DEMO } from "./demo";
 import { APP_VERSION } from "./version";
 import { pickAssignableUnit } from "./catalog";
+import {
+  canAccessSite,
+  canStaff,
+  getCurrentStaff,
+  permissionDeniedMessage,
+  type OperatorPermission,
+} from "./permissions";
 
 function siteHoursParts(hours: string) {
   return siteOpenClose({ hours });
@@ -100,13 +107,23 @@ interface AppState {
   darkMode: boolean;
   weekendSurcharge: Record<string, boolean>;
   lastSeenVersion: string | null;
+  welcomeComplete: boolean;
+  safetyTipsDismissed: boolean;
+  riderGuide: "welcome" | "safety" | null;
   /** Operator console: null = all lokasi. */
   operatorActiveSiteId: string | null;
   setHydrated: (v: boolean) => void;
   setToast: (msg: string | null) => void;
   toggleDarkMode: () => void;
   markVersionSeen: () => void;
+  completeWelcome: () => void;
+  dismissSafetyTips: () => void;
+  showRiderGuide: (guide: "welcome" | "safety" | null) => void;
   setOperatorActiveSiteId: (siteId: string | null) => void;
+  updateStaffSiteIds: (
+    staffId: string,
+    siteIds: string[] | null,
+  ) => string | null;
   pushNotification: (
     title: string,
     body: string,
@@ -189,7 +206,7 @@ interface AppState {
     batteryPct: number | null;
     color?: string;
     colorHex?: string;
-  }) => Vehicle;
+  }) => Vehicle | null;
   /** Add (+1) or remove (−1 available) unit for a model at a site. */
   adjustFleetStock: (input: {
     modelId: string;
@@ -208,6 +225,25 @@ interface AppState {
 }
 
 const emptyUser: AppUser = { role: null, name: "" };
+
+function operatorCan(
+  state: Pick<AppState, "user" | "staff">,
+  permission: OperatorPermission,
+  siteId?: string,
+): boolean {
+  if (state.user.role !== "operator") return true;
+  return canStaff(
+    getCurrentStaff(state.user, state.staff),
+    permission,
+    siteId,
+  );
+}
+
+function operatorDeniedToast(
+  state: Pick<AppState, "user" | "staff">,
+): string {
+  return permissionDeniedMessage(getCurrentStaff(state.user, state.staff));
+}
 
 function notifyConfirm(booking: Booking): AppNotification {
   return {
@@ -244,6 +280,9 @@ export const useAppStore = create<AppState>()(
       toast: null,
       darkMode: false,
       lastSeenVersion: null,
+      welcomeComplete: false,
+      safetyTipsDismissed: false,
+      riderGuide: null,
       operatorActiveSiteId: null,
       weekendSurcharge: {
         "op-margonda": true,
@@ -258,8 +297,75 @@ export const useAppStore = create<AppState>()(
       setToast: (msg) => set({ toast: msg }),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
       markVersionSeen: () => set({ lastSeenVersion: APP_VERSION }),
+      completeWelcome: () =>
+        set({ welcomeComplete: true, riderGuide: null }),
+      dismissSafetyTips: () => set({ safetyTipsDismissed: true }),
+      showRiderGuide: (guide) =>
+        set((s) => ({
+          riderGuide: guide,
+          safetyTipsDismissed:
+            guide === "safety" ? false : s.safetyTipsDismissed,
+        })),
       setOperatorActiveSiteId: (siteId) =>
-        set({ operatorActiveSiteId: siteId }),
+        set((s) => {
+          const member = getCurrentStaff(s.user, s.staff);
+          if (siteId && !canAccessSite(member, siteId)) {
+            return {
+              operatorActiveSiteId: s.operatorActiveSiteId,
+              toast: "Lokasi ini tidak ditugaskan ke akun Anda",
+            };
+          }
+          return { operatorActiveSiteId: siteId };
+        }),
+
+      updateStaffSiteIds: (staffId, siteIds) => {
+        const state = get();
+        const target = state.staff.find((member) => member.id === staffId);
+        if (!target) return "Staf tidak ditemukan";
+        if (!operatorCan(state, "staff.manage")) {
+          return operatorDeniedToast(state);
+        }
+        if (target.operatorId !== state.user.operatorId) {
+          return "Staf bukan bagian dari operator ini";
+        }
+        const validSiteIds = new Set(
+          state.sites
+            .filter((site) => site.operatorId === target.operatorId)
+            .map((site) => site.id),
+        );
+        const normalized =
+          siteIds == null
+            ? null
+            : [...new Set(siteIds.filter((id) => validSiteIds.has(id)))];
+        set((s) => ({
+          staff: s.staff.map((member) =>
+            member.id === staffId
+              ? {
+                  ...member,
+                  siteIds: normalized,
+                  locationLabel:
+                    normalized == null
+                      ? "Semua lokasi"
+                      : normalized
+                          .map(
+                            (id) =>
+                              s.sites.find((site) => site.id === id)?.name,
+                          )
+                          .filter(Boolean)
+                          .join(", ") || "Belum ditugaskan",
+                }
+              : member,
+          ),
+          operatorActiveSiteId:
+            s.user.staffId === staffId &&
+            s.operatorActiveSiteId &&
+            normalized != null &&
+            !normalized.includes(s.operatorActiveSiteId)
+              ? normalized[0] ?? null
+              : s.operatorActiveSiteId,
+        }));
+        return null;
+      },
 
       pushNotification: (title, body, opts) =>
         set((s) => ({
@@ -299,6 +405,8 @@ export const useAppStore = create<AppState>()(
             operatorId: member.operatorId,
             staffId: member.id,
           },
+          operatorActiveSiteId:
+            member.siteIds?.length === 1 ? member.siteIds[0] : null,
         });
         return null;
       },
@@ -397,6 +505,7 @@ export const useAppStore = create<AppState>()(
           paymentMethod: input.paymentMethod,
           paymentStatus: "pending",
           appointmentAt: input.appointmentAt ?? null,
+          readyAt: null,
           startsAt: null,
           endsAt: null,
           completedAt: null,
@@ -429,10 +538,21 @@ export const useAppStore = create<AppState>()(
         set((s) => {
           const booking = s.bookings.find((b) => b.id === bookingId);
           if (!booking || booking.status !== "pending") return s;
+          if (!operatorCan(s, "bookings.manage", booking.siteId)) {
+            return { ...s, toast: operatorDeniedToast(s) };
+          }
           return {
             bookings: s.bookings.map((b) =>
               b.id === bookingId
-                ? { ...b, status: nextStatusAfterConfirm(b) }
+                ? {
+                    ...b,
+                    status: nextStatusAfterConfirm(b),
+                    readyAt:
+                      b.paymentStatus === "paid" ||
+                      b.paymentMethod === "pay_at_operator"
+                        ? new Date().toISOString()
+                        : b.readyAt,
+                  }
                 : b,
             ),
             notifications: [notifyConfirm(booking), ...s.notifications],
@@ -443,6 +563,12 @@ export const useAppStore = create<AppState>()(
       declineBooking: (bookingId) =>
         set((s) => {
           const booking = s.bookings.find((b) => b.id === bookingId);
+          if (
+            booking &&
+            !operatorCan(s, "bookings.manage", booking.siteId)
+          ) {
+            return { ...s, toast: operatorDeniedToast(s) };
+          }
           return {
             bookings: s.bookings.map((b) =>
               b.id === bookingId ? { ...b, status: "cancelled" } : b,
@@ -506,13 +632,25 @@ export const useAppStore = create<AppState>()(
       confirmBulk: (ids) =>
         set((s) => {
           const confirmed = s.bookings.filter(
-            (b) => ids.includes(b.id) && b.status === "pending",
+            (b) =>
+              ids.includes(b.id) &&
+              b.status === "pending" &&
+              operatorCan(s, "bookings.manage", b.siteId),
           );
+          const confirmedIds = new Set(confirmed.map((booking) => booking.id));
           const notes = confirmed.map(notifyConfirm);
           return {
             bookings: s.bookings.map((b) =>
-              ids.includes(b.id) && b.status === "pending"
-                ? { ...b, status: nextStatusAfterConfirm(b) }
+              confirmedIds.has(b.id)
+                ? {
+                    ...b,
+                    status: nextStatusAfterConfirm(b),
+                    readyAt:
+                      b.paymentStatus === "paid" ||
+                      b.paymentMethod === "pay_at_operator"
+                        ? new Date().toISOString()
+                        : b.readyAt,
+                  }
                 : b,
             ),
             notifications: [...notes, ...s.notifications],
@@ -524,6 +662,15 @@ export const useAppStore = create<AppState>()(
         }),
 
       payBooking: (bookingId) => {
+        const before = get();
+        const booking = before.bookings.find((b) => b.id === bookingId);
+        if (
+          booking &&
+          !operatorCan(before, "bookings.manage", booking.siteId)
+        ) {
+          set({ toast: operatorDeniedToast(before) });
+          return;
+        }
         set((s) => ({
           bookings: s.bookings.map((b) =>
             b.id === bookingId
@@ -532,6 +679,10 @@ export const useAppStore = create<AppState>()(
                   paymentStatus: "paid",
                   status:
                     b.status === "pending" ? "pending" : "awaiting_pickup",
+                  readyAt:
+                    b.status === "pending"
+                      ? b.readyAt
+                      : (b.readyAt ?? new Date().toISOString()),
                 }
               : b,
           ),
@@ -588,6 +739,9 @@ export const useAppStore = create<AppState>()(
         set((s) => {
           const booking = s.bookings.find((b) => b.id === bookingId);
           if (!booking) return s;
+          if (!operatorCan(s, "bookings.manage", booking.siteId)) {
+            return { ...s, toast: operatorDeniedToast(s) };
+          }
           const needsPhys =
             booking.keysAccess === "physical" || booking.keysAccess === "both";
           if (!needsPhys) {
@@ -635,6 +789,9 @@ export const useAppStore = create<AppState>()(
         set((s) => {
           const booking = s.bookings.find((b) => b.id === bookingId);
           if (!booking) return s;
+          if (!operatorCan(s, "bookings.manage", booking.siteId)) {
+            return { ...s, toast: operatorDeniedToast(s) };
+          }
           return {
             bookings: s.bookings.map((b) =>
               b.id === bookingId
@@ -733,8 +890,13 @@ export const useAppStore = create<AppState>()(
         }),
 
       completeReturn: (bookingId) => {
-        const booking = get().bookings.find((b) => b.id === bookingId);
+        const state = get();
+        const booking = state.bookings.find((b) => b.id === bookingId);
         if (!booking) return;
+        if (!operatorCan(state, "bookings.manage", booking.siteId)) {
+          set({ toast: operatorDeniedToast(state) });
+          return;
+        }
         const needsPhys =
           booking.keysAccess === "physical" || booking.keysAccess === "both";
         // Operator finish = key must be back. Auto-mark collected when finishing.
@@ -805,6 +967,13 @@ export const useAppStore = create<AppState>()(
 
       updateVehicleStatus: (vehicleId, status) =>
         set((s) => {
+          const vehicle = s.vehicles.find((v) => v.id === vehicleId);
+          if (
+            vehicle &&
+            !operatorCan(s, "fleet.manage", vehicle.siteId)
+          ) {
+            return { ...s, toast: operatorDeniedToast(s) };
+          }
           const vehicles = s.vehicles.map((v) =>
             v.id === vehicleId ? { ...v, status } : v,
           );
@@ -814,6 +983,8 @@ export const useAppStore = create<AppState>()(
         }),
 
       addSite: (input) => {
+        const state = get();
+        if (!operatorCan(state, "locations.manage")) return null;
         if (!input.name.trim()) return null;
         const op = get().operators.find((o) => o.id === input.operatorId);
         const hours = input.hours?.trim() || "07:00 - 20:00";
@@ -846,6 +1017,10 @@ export const useAppStore = create<AppState>()(
       },
 
       updateSite: (siteId, input) => {
+        const state = get();
+        if (!operatorCan(state, "locations.manage", siteId)) {
+          return operatorDeniedToast(state);
+        }
         if (!input.name.trim()) return "Place name required";
         const site = get().sites.find((x) => x.id === siteId);
         if (!site) return "Place not found";
@@ -883,6 +1058,10 @@ export const useAppStore = create<AppState>()(
       },
 
       removeSite: (siteId) => {
+        const state = get();
+        if (!operatorCan(state, "locations.manage", siteId)) {
+          return operatorDeniedToast(state);
+        }
         const units = get().vehicles.filter((v) => v.siteId === siteId);
         if (units.some((v) => v.status === "rented" || v.status === "reserved")) {
           return "Move or finish active bookings before removing this site";
@@ -892,11 +1071,28 @@ export const useAppStore = create<AppState>()(
           vehicles: s.vehicles.map((v) =>
             v.siteId === siteId ? { ...v, siteId: "" } : v,
           ),
+          staff: s.staff.map((member) =>
+            member.siteIds == null
+              ? member
+              : {
+                  ...member,
+                  siteIds: member.siteIds.filter((id) => id !== siteId),
+                },
+          ),
+          operatorActiveSiteId:
+            s.operatorActiveSiteId === siteId
+              ? null
+              : s.operatorActiveSiteId,
         }));
         return null;
       },
 
       addVehicle: (input) => {
+        const state = get();
+        if (!operatorCan(state, "fleet.manage", input.siteId)) {
+          set({ toast: operatorDeniedToast(state) });
+          return null;
+        }
         const op = get().operators.find((o) => o.id === input.operatorId);
         const site = get().sites.find((x) => x.id === input.siteId);
         const existingModel = input.modelId
@@ -1016,6 +1212,10 @@ export const useAppStore = create<AppState>()(
       },
 
       adjustFleetStock: ({ modelId, siteId, delta }) => {
+        const state = get();
+        if (!operatorCan(state, "fleet.manage", siteId)) {
+          return operatorDeniedToast(state);
+        }
         const model = get().models.find((m) => m.id === modelId);
         const site = get().sites.find((x) => x.id === siteId);
         if (!model || !site) return "Model or site missing";
@@ -1057,12 +1257,29 @@ export const useAppStore = create<AppState>()(
       },
 
       removeVehicle: (vehicleId) =>
-        set((s) => ({
-          vehicles: s.vehicles.filter((v) => v.id !== vehicleId),
-        })),
+        set((s) => {
+          const vehicle = s.vehicles.find((v) => v.id === vehicleId);
+          if (
+            vehicle &&
+            !operatorCan(s, "fleet.manage", vehicle.siteId)
+          ) {
+            return { ...s, toast: operatorDeniedToast(s) };
+          }
+          return {
+            vehicles: s.vehicles.filter((v) => v.id !== vehicleId),
+          };
+        }),
 
       moveVehicleSite: (vehicleId, siteId) =>
         set((s) => {
+          const vehicle = s.vehicles.find((v) => v.id === vehicleId);
+          if (
+            vehicle &&
+            (!operatorCan(s, "fleet.manage", vehicle.siteId) ||
+              (siteId && !operatorCan(s, "fleet.manage", siteId)))
+          ) {
+            return { ...s, toast: operatorDeniedToast(s) };
+          }
           if (!siteId) {
             return {
               vehicles: s.vehicles.map((v) =>
@@ -1082,14 +1299,23 @@ export const useAppStore = create<AppState>()(
         }),
 
       updatePricing: (operatorId, tiers) =>
-        set((s) => ({
-          pricing: { ...s.pricing, [operatorId]: tiers },
-        })),
+        set((s) =>
+          operatorCan(s, "pricing.manage")
+            ? { pricing: { ...s.pricing, [operatorId]: tiers } }
+            : { ...s, toast: operatorDeniedToast(s) },
+        ),
 
       setWeekendSurcharge: (operatorId, on) =>
-        set((s) => ({
-          weekendSurcharge: { ...s.weekendSurcharge, [operatorId]: on },
-        })),
+        set((s) =>
+          operatorCan(s, "pricing.manage")
+            ? {
+                weekendSurcharge: {
+                  ...s.weekendSurcharge,
+                  [operatorId]: on,
+                },
+              }
+            : { ...s, toast: operatorDeniedToast(s) },
+        ),
 
       markNotificationsRead: () =>
         set((s) => ({
@@ -1104,11 +1330,20 @@ export const useAppStore = create<AppState>()(
         })),
 
       simulateRiderRequest: () => {
-        const opId = get().user.operatorId;
+        const state = get();
+        const opId = state.user.operatorId;
         if (!opId) return null;
+        const member = getCurrentStaff(state.user, state.staff);
+        if (!canStaff(member, "bookings.manage")) {
+          set({ toast: operatorDeniedToast(state) });
+          return null;
+        }
         const vehicle =
-          get().vehicles.find(
-            (v) => v.operatorId === opId && v.status === "available",
+          state.vehicles.find(
+            (v) =>
+              v.operatorId === opId &&
+              v.status === "available" &&
+              canAccessSite(member, v.siteId),
           ) ?? null;
         if (!vehicle) {
           get().setToast("No free bike — mark one Free first");
@@ -1158,6 +1393,7 @@ export const useAppStore = create<AppState>()(
           paymentMethod: "qris",
           paymentStatus: "paid",
           appointmentAt: new Date(Date.now() + 45 * 60_000).toISOString(),
+          readyAt: null,
           startsAt: null,
           endsAt: null,
           completedAt: null,
@@ -1204,6 +1440,9 @@ export const useAppStore = create<AppState>()(
           notifications: seedNotifications,
           reviews: seedReviews,
           chargingAddons: seedChargingAddons,
+          welcomeComplete: false,
+          safetyTipsDismissed: false,
+          riderGuide: null,
         }),
     }),
     {
@@ -1338,6 +1577,25 @@ export const useAppStore = create<AppState>()(
               state.bookings = [...seedMockBookings, ...state.bookings];
             }
           }
+          // Seed live demo trips (active ride + ready to collect) once for
+          // sessions persisted before they existed.
+          for (const demo of seedMockBookings) {
+            const vehicleFree = !state.bookings.some(
+              (b) =>
+                b.vehicleId === demo.vehicleId &&
+                b.status !== "completed" &&
+                b.status !== "cancelled",
+            );
+            if (
+              (demo.status === "active" ||
+                demo.status === "awaiting_pickup") &&
+              !state.bookings.some((b) => b.id === demo.id) &&
+              state.vehicles.some((v) => v.id === demo.vehicleId) &&
+              vehicleFree
+            ) {
+              state.bookings = [demo, ...state.bookings];
+            }
+          }
           // Backfill color on older persisted units
           const palette = [
             { color: "Black", colorHex: "#1C1C1E" },
@@ -1368,6 +1626,7 @@ export const useAppStore = create<AppState>()(
         sites: s.sites,
         models: s.models,
         vehicles: s.vehicles,
+        staff: s.staff,
         operators: s.operators,
         bookings: s.bookings,
         favorites: s.favorites,
@@ -1378,6 +1637,8 @@ export const useAppStore = create<AppState>()(
         pricing: s.pricing,
         weekendSurcharge: s.weekendSurcharge,
         lastSeenVersion: s.lastSeenVersion,
+        welcomeComplete: s.welcomeComplete,
+        safetyTipsDismissed: s.safetyTipsDismissed,
         operatorActiveSiteId: s.operatorActiveSiteId,
       }),
     },

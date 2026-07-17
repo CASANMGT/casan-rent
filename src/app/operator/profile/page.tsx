@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Bike,
@@ -16,6 +15,7 @@ import { OpMenuLink } from "@/components/operator/OperatorUi";
 import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import { APP_VERSION, hasUnseenUpdates } from "@/lib/version";
+import { canStaff, getCurrentStaff } from "@/lib/permissions";
 
 export default function OperatorProfilePage() {
   return (
@@ -31,6 +31,8 @@ function ProfileInner() {
   const operators = useAppStore((s) => s.operators);
   const logout = useAppStore((s) => s.logout);
   const lastSeenVersion = useAppStore((s) => s.lastSeenVersion);
+  const staff = useAppStore((s) => s.staff);
+  const currentStaff = getCurrentStaff(user, staff);
   const op = operators.find((o) => o.id === user.operatorId);
   const unseen = hasUnseenUpdates(lastSeenVersion);
 
@@ -41,6 +43,7 @@ function ProfileInner() {
         <div className="font-display text-xl font-semibold">{op?.name}</div>
         <div className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
           {op?.city} · masuk sebagai {user.name}
+          {currentStaff ? ` · ${currentStaff.role.replace("_", " ")}` : ""}
         </div>
         <div className="mt-2 text-xs" style={{ color: "var(--text2)" }}>
           Versi app v{APP_VERSION}
@@ -54,12 +57,14 @@ function ProfileInner() {
         hint="What's new in the app"
         badge={unseen ? "Baru" : undefined}
       />
+      {canStaff(currentStaff, "pricing.manage") ? (
       <OpMenuLink
         href="/operator/pricing"
         icon={Tag}
         label="Atur harga"
         hint="Set rental prices"
       />
+      ) : null}
       <OpMenuLink
         href="/operator/staff"
         icon={Users}

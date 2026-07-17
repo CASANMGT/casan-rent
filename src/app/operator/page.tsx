@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
 import {
   Banknote,
   BellRing,
@@ -34,6 +33,12 @@ import { OP, uniqueAreas } from "@/lib/operator-ui";
 import { AuthGate } from "@/components/AuthGate";
 import { APP_VERSION, hasUnseenUpdates } from "@/lib/version";
 import { LocationSwitcher } from "@/components/operator/FleetModelStock";
+import {
+  canAccessSite,
+  canStaff,
+  getCurrentStaff,
+} from "@/lib/permissions";
+import { PendingAge } from "@/components/UxSignals";
 
 export default function OperatorDashboardPage() {
   return (
@@ -56,30 +61,31 @@ function DashboardInner() {
   const declineBooking = useAppStore((s) => s.declineBooking);
   const simulateRiderRequest = useAppStore((s) => s.simulateRiderRequest);
   const setToast = useAppStore((s) => s.setToast);
+  const staff = useAppStore((s) => s.staff);
 
   const opId = user.operatorId!;
+  const currentStaff = getCurrentStaff(user, staff);
+  const canManageBookings = canStaff(currentStaff, "bookings.manage");
   const op = operators.find((o) => o.id === opId);
   const feePct = op?.platformFeePct ?? 15;
-  const fleetAll = vehicles.filter((v) => v.operatorId === opId);
-  const opSites = sites.filter((s) => s.operatorId === opId);
-  const opBookingsAll = bookings.filter((b) => b.operatorId === opId);
+  const fleetAll = vehicles.filter(
+    (v) => v.operatorId === opId && canAccessSite(currentStaff, v.siteId),
+  );
+  const opSites = sites.filter(
+    (s) => s.operatorId === opId && canAccessSite(currentStaff, s.id),
+  );
+  const opBookingsAll = bookings.filter(
+    (b) => b.operatorId === opId && canAccessSite(currentStaff, b.siteId),
+  );
   const unseen = hasUnseenUpdates(lastSeenVersion);
   const areas = uniqueAreas(opSites);
 
-  const fleet = useMemo(
-    () =>
-      operatorActiveSiteId
-        ? fleetAll.filter((v) => v.siteId === operatorActiveSiteId)
-        : fleetAll,
-    [fleetAll, operatorActiveSiteId],
-  );
-  const opBookings = useMemo(
-    () =>
-      operatorActiveSiteId
-        ? opBookingsAll.filter((b) => b.siteId === operatorActiveSiteId)
-        : opBookingsAll,
-    [opBookingsAll, operatorActiveSiteId],
-  );
+  const fleet = operatorActiveSiteId
+    ? fleetAll.filter((v) => v.siteId === operatorActiveSiteId)
+    : fleetAll;
+  const opBookings = operatorActiveSiteId
+    ? opBookingsAll.filter((b) => b.siteId === operatorActiveSiteId)
+    : opBookingsAll;
 
   const pending = opBookings.filter((b) => b.status === "pending");
   const overdue = opBookings.filter((b) => b.status === "overdue");
@@ -96,7 +102,7 @@ function DashboardInner() {
       !["pending", "cancelled"].includes(b.status),
   );
 
-  const stats = useMemo(() => {
+  const stats = (() => {
     const free = fleet.filter((v) => v.status === "available").length;
     const rented = onRent.length;
     const broken = fleet.filter(
@@ -152,7 +158,7 @@ function DashboardInner() {
       keepWeek: Math.round(grossWeek * (1 - feePct / 100)),
       tripsToday: paidToday.length,
     };
-  }, [fleet, opBookings, feePct, onRent.length]);
+  })();
 
   const attentionCount =
     pending.length + overdue.length + awaitingCash.length + stats.keysOut;
@@ -256,13 +262,13 @@ function DashboardInner() {
           href="/operator/bookings"
           className="rounded-2xl border p-3"
           style={{
-            background: pending.length ? "#FEF5E7" : "var(--card)",
+            background: pending.length ? "var(--warning-soft)" : "var(--card)",
             borderColor: pending.length ? "var(--warn)" : "var(--border)",
           }}
         >
           <BellRing
             size={16}
-            style={{ color: pending.length ? "#9A5B00" : "var(--primary)" }}
+            style={{ color: pending.length ? "var(--text-warn)" : "var(--primary)" }}
           />
           <div
             className="mt-2 text-[10px] font-semibold"
@@ -305,7 +311,7 @@ function DashboardInner() {
             <Link
               href="/operator/bookings"
               className="flex items-center gap-3 rounded-xl border px-3 py-2.5"
-              style={{ background: "#FADBD8", borderColor: "var(--danger)" }}
+              style={{ background: "var(--danger-soft)", borderColor: "var(--danger)" }}
             >
               <CircleAlert size={18} style={{ color: "var(--danger)" }} />
               <div className="flex-1 text-sm font-bold" style={{ color: "var(--danger)" }}>
@@ -320,10 +326,10 @@ function DashboardInner() {
             <Link
               href="/operator/bookings"
               className="flex items-center gap-3 rounded-xl border px-3 py-2.5"
-              style={{ background: "#FEF5E7", borderColor: "var(--warn)" }}
+              style={{ background: "var(--warning-soft)", borderColor: "var(--warn)" }}
             >
-              <Banknote size={18} style={{ color: "#9A5B00" }} />
-              <div className="flex-1 text-sm font-bold" style={{ color: "#9A5B00" }}>
+              <Banknote size={18} style={{ color: "var(--text-warn)" }} />
+              <div className="flex-1 text-sm font-bold" style={{ color: "var(--text-warn)" }}>
                 {awaitingCash.length} bayar di toko belum dikonfirmasi
               </div>
             </Link>
@@ -332,10 +338,10 @@ function DashboardInner() {
             <Link
               href="/operator/bookings"
               className="flex items-center gap-3 rounded-xl border px-3 py-2.5"
-              style={{ background: "#FEF5E7", borderColor: "var(--warn)" }}
+              style={{ background: "var(--warning-soft)", borderColor: "var(--warn)" }}
             >
-              <KeyRound size={18} style={{ color: "#9A5B00" }} />
-              <div className="flex-1 text-sm font-bold" style={{ color: "#9A5B00" }}>
+              <KeyRound size={18} style={{ color: "var(--text-warn)" }} />
+              <div className="flex-1 text-sm font-bold" style={{ color: "var(--text-warn)" }}>
                 {stats.keysOut} kunci masih di pelanggan
               </div>
             </Link>
@@ -365,7 +371,7 @@ function DashboardInner() {
       {pending.length === 0 ? (
         <div className="op-card text-sm" style={{ color: "var(--text2)" }}>
           Tidak ada permintaan baru — cek kunci & sepeda di bawah.
-          {IS_DEMO ? (
+          {IS_DEMO && canManageBookings ? (
             <button
               type="button"
               className="mt-3 w-full rounded-xl py-3 text-sm font-bold text-white"
@@ -387,14 +393,17 @@ function DashboardInner() {
             <div
               key={b.id}
               className="mx-4 mb-3 rounded-2xl border-2 p-4"
-              style={{ borderColor: "var(--warn)", background: "#FEF5E7" }}
+              style={{ borderColor: "var(--warn)", background: "var(--warning-soft)" }}
             >
               <div
-                className="flex items-center gap-2 text-xs font-bold"
-                style={{ color: "#9A5B00" }}
+                className="flex items-center justify-between gap-2 text-xs font-bold"
+                style={{ color: "var(--text-warn)" }}
               >
-                <BellRing size={14} />
-                Pelanggan menunggu
+                <span className="inline-flex items-center gap-2">
+                  <BellRing size={14} />
+                  Pelanggan menunggu
+                </span>
+                <PendingAge createdAt={b.createdAt} />
               </div>
               <div className="mt-1 text-lg font-bold">{b.riderName}</div>
               {b.riderPhone ? (
@@ -434,6 +443,7 @@ function DashboardInner() {
                   </>
                 ) : null}
               </div>
+              {canManageBookings ? (
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -450,7 +460,7 @@ function DashboardInner() {
                 <button
                   type="button"
                   className="flex items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold"
-                  style={{ background: "#FADBD8", color: "var(--danger)" }}
+                  style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
                   onClick={() => {
                     if (!window.confirm(`Tolak pesanan ${b.code}?`)) return;
                     declineBooking(b.id);
@@ -461,6 +471,11 @@ function DashboardInner() {
                   Tolak
                 </button>
               </div>
+              ) : (
+                <div className="mt-3 text-xs font-semibold" style={{ color: "var(--text2)" }}>
+                  Mode lihat saja · peran Anda tidak dapat menerima atau menolak pesanan.
+                </div>
+              )}
             </div>
           );
         })
@@ -483,10 +498,10 @@ function DashboardInner() {
                 style={{
                   background: "var(--card)",
                   borderColor: "var(--border)",
-                  borderLeft: "4px solid #b45309",
+                  borderLeft: "4px solid var(--key)",
                 }}
               >
-                <KeyRound size={20} style={{ color: "#b45309" }} />
+                <KeyRound size={20} style={{ color: "var(--key)" }} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-bold text-sm">{b.riderName}</div>
                   <div className="text-xs" style={{ color: "var(--text2)" }}>
@@ -522,7 +537,10 @@ function DashboardInner() {
                 href="/operator/bookings"
                 className="mx-4 mb-2 block rounded-2xl border px-4 py-3"
                 style={{
-                  background: b.status === "overdue" ? "#FADBD8" : "var(--card)",
+                  background:
+                    b.status === "overdue"
+                      ? "var(--danger-soft)"
+                      : "var(--card)",
                   borderColor:
                     b.status === "overdue" ? "var(--danger)" : "var(--border)",
                 }}

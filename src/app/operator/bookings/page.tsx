@@ -30,6 +30,12 @@ import {
 } from "@/lib/format";
 import { IS_DEMO } from "@/lib/demo";
 import { LocationSwitcher } from "@/components/operator/FleetModelStock";
+import {
+  canAccessSite,
+  canStaff,
+  getCurrentStaff,
+} from "@/lib/permissions";
+import { PendingAge } from "@/components/UxSignals";
 
 type Tab = "new" | "active" | "done";
 
@@ -61,6 +67,9 @@ function BookingsInner() {
   const payBooking = useAppStore((s) => s.payBooking);
   const simulateRiderRequest = useAppStore((s) => s.simulateRiderRequest);
   const setToast = useAppStore((s) => s.setToast);
+  const staff = useAppStore((s) => s.staff);
+  const currentStaff = getCurrentStaff(user, staff);
+  const canManageBookings = canStaff(currentStaff, "bookings.manage");
 
   const [tab, setTab] = useState<Tab>("new");
   const [openDetailIds, setOpenDetailIds] = useState<Record<string, boolean>>(
@@ -68,15 +77,24 @@ function BookingsInner() {
   );
 
   const opSites = useMemo(
-    () => sites.filter((s) => s.operatorId === user.operatorId),
-    [sites, user.operatorId],
+    () =>
+      sites.filter(
+        (site) =>
+          site.operatorId === user.operatorId &&
+          canAccessSite(currentStaff, site.id),
+      ),
+    [sites, user.operatorId, currentStaff],
   );
 
   const mine = useMemo(() => {
-    const all = bookings.filter((b) => b.operatorId === user.operatorId);
+    const all = bookings.filter(
+      (booking) =>
+        booking.operatorId === user.operatorId &&
+        canAccessSite(currentStaff, booking.siteId),
+    );
     if (!operatorActiveSiteId) return all;
     return all.filter((b) => b.siteId === operatorActiveSiteId);
-  }, [bookings, user.operatorId, operatorActiveSiteId]);
+  }, [bookings, user.operatorId, operatorActiveSiteId, currentStaff]);
 
   const list = useMemo(() => {
     if (tab === "new")
@@ -117,7 +135,7 @@ function BookingsInner() {
       <Header
         title="Pesanan · Orders"
         right={
-          IS_DEMO ? (
+          IS_DEMO && canManageBookings ? (
           <button
             type="button"
             className="text-[11px] font-bold text-white"
@@ -160,7 +178,7 @@ function BookingsInner() {
       {keysOut > 0 ? (
         <div
           className="mx-4 mt-3 flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold"
-          style={{ borderColor: "var(--warn)", background: "#FEF5E7", color: "#9A5B00" }}
+          style={{ borderColor: "var(--warn)", background: "var(--warning-soft)", color: "var(--text-warn)" }}
         >
           <KeyRound size={18} />
           {keysOut} kunci masih di pelanggan — ambil saat mereka kembali
@@ -205,7 +223,7 @@ function BookingsInner() {
         <div className="mx-4 mt-3 grid grid-cols-2 gap-2">
           <div
             className="rounded-xl border p-3"
-            style={{ background: "#FEF5E7", borderColor: "var(--warn)" }}
+            style={{ background: "var(--warning-soft)", borderColor: "var(--warn)" }}
           >
             <div className="text-2xl font-bold" style={{ color: "var(--warn)" }}>
               {newCount}
@@ -214,7 +232,7 @@ function BookingsInner() {
           </div>
           <div
             className="rounded-xl border p-3"
-            style={{ background: "#E8F8F5", borderColor: "var(--ok)" }}
+            style={{ background: "var(--success-soft)", borderColor: "var(--ok)" }}
           >
             <div className="text-2xl font-bold" style={{ color: "var(--ok)" }}>
               {availableCount}
@@ -224,7 +242,9 @@ function BookingsInner() {
         </div>
       ) : null}
 
-      {tab === "new" && list.some((b) => b.status === "pending") ? (
+      {canManageBookings &&
+      tab === "new" &&
+      list.some((b) => b.status === "pending") ? (
         <button
           type="button"
           className="mx-4 mt-3 w-[calc(100%-32px)] rounded-xl py-3 text-sm font-bold text-white"
@@ -258,7 +278,7 @@ function BookingsInner() {
                 ? "Tidak ada yang sedang menyewa."
                 : "Belum ada trip selesai."}
           </p>
-          {tab === "new" && IS_DEMO ? (
+          {tab === "new" && IS_DEMO && canManageBookings ? (
             <button
               type="button"
               className="mt-4 rounded-xl px-5 py-3 text-sm font-bold text-white"
@@ -324,16 +344,16 @@ function BookingsInner() {
                     : b.status === "overdue"
                       ? "var(--danger)"
                       : phys && b.physicalKeyGiven && !b.physicalKeyReturned
-                        ? "#b45309"
+                        ? "var(--key)"
                         : "var(--primary)"
                 }`,
               }}
             >
-              <div
-                className="text-xs font-bold"
-                style={{ color: "var(--text2)" }}
-              >
-                {plainStatus}
+              <div className="flex items-center justify-between gap-2 text-xs font-bold">
+                <span style={{ color: "var(--text2)" }}>{plainStatus}</span>
+                {b.status === "pending" ? (
+                  <PendingAge createdAt={b.createdAt} />
+                ) : null}
               </div>
               <div className="mt-1 text-base font-bold">{b.riderName}</div>
               {b.riderPhone ? (
@@ -549,7 +569,9 @@ function BookingsInner() {
                 <div
                   className="mt-3 rounded-xl px-3 py-2.5"
                   style={{
-                    background: returnDue.late ? "#FADBD8" : "#E8F8F5",
+                    background: returnDue.late
+                      ? "var(--danger-soft)"
+                      : "var(--success-soft)",
                     border: `1px solid ${returnDue.late ? "var(--danger)" : "var(--ok)"}`,
                   }}
                 >
@@ -577,6 +599,8 @@ function BookingsInner() {
                 </div>
               ) : null}
 
+              {canManageBookings ? (
+              <>
               {b.status === "pending" ? (
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <button
@@ -594,7 +618,7 @@ function BookingsInner() {
                   <button
                     type="button"
                     className="flex items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold"
-                    style={{ background: "#FADBD8", color: "var(--danger)" }}
+                    style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
                     onClick={() => {
                       if (!window.confirm(`Tolak pesanan ${b.code}?`)) return;
                       declineBooking(b.id);
@@ -632,7 +656,7 @@ function BookingsInner() {
                 <button
                   type="button"
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold text-white"
-                  style={{ background: "#b45309" }}
+                  style={{ background: "var(--key)" }}
                   onClick={() => {
                     givePhysicalKey(b.id);
                     setToast(`Kunci diserahkan · kembali ${expectedReturn}`);
@@ -708,6 +732,8 @@ function BookingsInner() {
                 >
                   Tutup sewa (tanpa kunci toko)
                 </button>
+              ) : null}
+              </>
               ) : null}
             </div>
           );

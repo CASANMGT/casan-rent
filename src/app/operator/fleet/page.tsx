@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Bike,
   CircleAlert,
   Clock,
+  LocateFixed,
   MapPin,
   MessageCircle,
   MoveRight,
@@ -33,6 +34,12 @@ import {
 } from "@/lib/format";
 import { groupSitesByArea, uniqueAreas } from "@/lib/operator-ui";
 import type { RentalMode, VehicleStatus, VehicleType } from "@/lib/types";
+import {
+  canAccessSite,
+  canStaff,
+  getCurrentStaff,
+} from "@/lib/permissions";
+import { GpsFreshness } from "@/components/UxSignals";
 
 export default function FleetPage() {
   return (
@@ -56,35 +63,67 @@ function FleetInner() {
   const removeSite = useAppStore((s) => s.removeSite);
   const moveVehicleSite = useAppStore((s) => s.moveVehicleSite);
   const setToast = useAppStore((s) => s.setToast);
+  const staff = useAppStore((s) => s.staff);
+  const operatorActiveSiteId = useAppStore((s) => s.operatorActiveSiteId);
+  const setOperatorActiveSiteId = useAppStore((s) => s.setOperatorActiveSiteId);
 
   const opId = user.operatorId!;
+  const currentStaff = getCurrentStaff(user, staff);
+  const canManageFleet = canStaff(currentStaff, "fleet.manage");
+  const canManageLocations = canStaff(currentStaff, "locations.manage");
   const opSites = useMemo(
-    () => sites.filter((x) => x.operatorId === opId),
-    [sites, opId],
+    () =>
+      sites.filter(
+        (site) =>
+          site.operatorId === opId && canAccessSite(currentStaff, site.id),
+      ),
+    [sites, opId, currentStaff],
   );
   const opModels = useMemo(
     () => models.filter((m) => m.operatorId === opId),
     [models, opId],
   );
   const fleet = useMemo(
-    () => vehicles.filter((v) => v.operatorId === opId),
-    [vehicles, opId],
+    () =>
+      vehicles.filter(
+        (vehicle) =>
+          vehicle.operatorId === opId &&
+          canAccessSite(currentStaff, vehicle.siteId),
+      ),
+    [vehicles, opId, currentStaff],
   );
   const onRentBookings = useMemo(
     () =>
       bookings.filter(
         (b) =>
           b.operatorId === opId &&
+          canAccessSite(currentStaff, b.siteId) &&
           (b.status === "active" || b.status === "overdue"),
       ),
-    [bookings, opId],
+    [bookings, opId, currentStaff],
   );
 
-  const [siteFilter, setSiteFilter] = useState<string>("all");
+  const [siteFilterLocal, setSiteFilterLocal] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"all" | VehicleStatus | "free">("all");
   const [panel, setPanel] = useState<"none" | "add" | "site" | "move">("none");
   const [moveToSite, setMoveToSite] = useState("");
+
+  const siteFilter =
+    siteFilterLocal ??
+    (operatorActiveSiteId &&
+    opSites.some((site) => site.id === operatorActiveSiteId)
+      ? operatorActiveSiteId
+      : "all");
+
+  function setSiteFilter(id: string) {
+    setSiteFilterLocal(id);
+    if (id === "all" || id === "unassigned") {
+      setOperatorActiveSiteId(null);
+      return;
+    }
+    setOperatorActiveSiteId(id);
+  }
 
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -99,14 +138,14 @@ function FleetInner() {
   const [newModelOpen, setNewModelOpen] = useState(false);
 
   const STOCK_COLORS = [
-    { color: "Black", colorHex: "#1C1C1E" },
-    { color: "White", colorHex: "#F2F2F7" },
-    { color: "Teal", colorHex: "#0D9488" },
-    { color: "Navy", colorHex: "#1E3A5F" },
-    { color: "Red", colorHex: "#C0392B" },
-    { color: "Silver", colorHex: "#A8B0B8" },
-    { color: "Forest", colorHex: "#1B5E3B" },
-    { color: "Sand", colorHex: "#C4A574" },
+    { color: "Black", label: "Hitam", colorHex: "#1C1C1E" },
+    { color: "White", label: "Putih", colorHex: "#F2F2F7" },
+    { color: "Teal", label: "Toska", colorHex: "#0D9488" },
+    { color: "Navy", label: "Biru tua", colorHex: "#1E3A5F" },
+    { color: "Red", label: "Merah", colorHex: "#C0392B" },
+    { color: "Silver", label: "Perak", colorHex: "#A8B0B8" },
+    { color: "Forest", label: "Hijau tua", colorHex: "#1B5E3B" },
+    { color: "Sand", label: "Krem", colorHex: "#C4A574" },
   ];
 
   const [siteName, setSiteName] = useState("");
@@ -120,6 +159,7 @@ function FleetInner() {
   const [siteLng, setSiteLng] = useState("");
   const [siteDesk, setSiteDesk] = useState(true);
   const [siteSelf, setSiteSelf] = useState(true);
+  const [locating, setLocating] = useState(false);
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const operators = useAppStore((s) => s.operators);
   const op = operators.find((o) => o.id === opId);
@@ -129,7 +169,10 @@ function FleetInner() {
     () => new Set(opSites.map((site) => site.id)),
     [opSites],
   );
-  const isUnassigned = (siteId: string) => !validSiteIds.has(siteId);
+  const isUnassigned = useCallback(
+    (siteId: string) => !validSiteIds.has(siteId),
+    [validSiteIds],
+  );
 
   const locationSummaries = useMemo(
     () => [
@@ -177,18 +220,13 @@ function FleetInner() {
         ).length,
       },
     ],
-    [fleet, opSites, validSiteIds, onRentBookings],
+    [fleet, opSites, isUnassigned, onRentBookings],
   );
 
   const activeSiteId = addSiteId || opSites[0]?.id || "";
   const hourPrice = pricing[opId]?.[1]?.priceIdr;
 
   const freeEverywhere = fleet.filter((v) => v.status === "available").length;
-
-  useEffect(() => {
-    if (siteFilter !== "all") return;
-    if (opSites[0]?.id) setSiteFilter(opSites[0].id);
-  }, [opSites, siteFilter]);
 
   const list = useMemo(() => {
     return fleet
@@ -211,9 +249,13 @@ function FleetInner() {
         if (b.status === "available" && a.status !== "available") return 1;
         return a.name.localeCompare(b.name);
       });
-  }, [fleet, siteFilter, validSiteIds, filter, q]);
+  }, [fleet, siteFilter, isUnassigned, filter, q]);
 
   function openAddStock() {
+    if (!canManageFleet) {
+      setToast("Peran Anda hanya dapat melihat armada");
+      return;
+    }
     const siteId =
       siteFilter !== "all" && siteFilter !== "unassigned"
         ? siteFilter
@@ -238,7 +280,7 @@ function FleetInner() {
 
     if (newModelOpen || !modelPick) {
       if (!name.trim() || !code.trim()) {
-        setToast("Name and code required for new model");
+        setToast("Nama dan awalan kode wajib diisi");
         return;
       }
       for (let i = 0; i < qty; i++) {
@@ -256,7 +298,7 @@ function FleetInner() {
           colorHex: stockColorHex,
         });
       }
-      setToast(`Added ${qty} · ${name.trim()}`);
+      setToast(`Ditambahkan ${qty} unit · ${name.trim()}`);
       setPanel("none");
       setName("");
       setCode("");
@@ -268,7 +310,7 @@ function FleetInner() {
 
     const model = opModels.find((m) => m.id === modelPick);
     if (!model) {
-      setToast("Pick a model");
+      setToast("Pilih model kendaraan");
       return;
     }
     const existing = fleet.filter((v) => v.modelId === model.id).length;
@@ -315,11 +357,19 @@ function FleetInner() {
   }
 
   function openAddSite() {
+    if (!canManageLocations) {
+      setToast("Hanya admin yang dapat menambah lokasi");
+      return;
+    }
     clearSiteForm();
     setPanel("site");
   }
 
   function openEditSite(siteId: string) {
+    if (!canManageLocations) {
+      setToast("Hanya admin yang dapat mengubah lokasi");
+      return;
+    }
     const site = opSites.find((x) => x.id === siteId);
     if (!site) return;
     setSiteName(site.name);
@@ -337,12 +387,39 @@ function FleetInner() {
     setPanel("site");
   }
 
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setToast("GPS tidak tersedia di perangkat ini");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setSiteLat(position.coords.latitude.toFixed(6));
+        setSiteLng(position.coords.longitude.toFixed(6));
+        setLocating(false);
+        setToast(
+          `Koordinat GPS terisi · akurasi ±${Math.round(position.coords.accuracy)} m`,
+        );
+      },
+      (error) => {
+        setLocating(false);
+        setToast(
+          error.code === error.PERMISSION_DENIED
+            ? "Izin lokasi ditolak — aktifkan GPS lalu coba lagi"
+            : "Lokasi GPS gagal dibaca — coba lagi di area terbuka",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 30_000 },
+    );
+  }
+
   function submitSite() {
     if (!opId) return;
     const lat = Number(siteLat);
     const lng = Number(siteLng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      setToast("Valid latitude and longitude required");
+      setToast("Lintang dan bujur harus valid");
       return;
     }
     if (editingSiteId) {
@@ -363,7 +440,7 @@ function FleetInner() {
         setToast(err);
         return;
       }
-      setToast("Location updated");
+      setToast("Lokasi diperbarui");
       clearSiteForm();
       setPanel("none");
       return;
@@ -383,10 +460,10 @@ function FleetInner() {
       supportsSelfService: siteSelf,
     });
     if (!site) {
-      setToast("Place name required");
+      setToast("Nama lokasi wajib diisi");
       return;
     }
-    setToast(`Place “${site.name}” added`);
+    setToast(`Lokasi “${site.name}” ditambahkan`);
     setSiteFilter(site.id);
     setAddSiteId(site.id);
     clearSiteForm();
@@ -404,19 +481,19 @@ function FleetInner() {
         v.siteId !== targetSiteId,
     );
     if (free.length === 0) {
-      setToast("No free bikes to move");
+      setToast("Tidak ada unit siap yang dapat dipindahkan");
       return;
     }
     const target = opSites.find((site) => site.id === targetSiteId);
     if (
       !window.confirm(
-        `Move ${free.length} ready bikes to ${target?.name ?? "this location"}?`,
+        `Pindahkan ${free.length} unit siap ke ${target?.name ?? "lokasi ini"}?`,
       )
     ) {
       return;
     }
     free.forEach((v) => moveVehicleSite(v.id, targetSiteId));
-    setToast(`Moved ${free.length} free bikes`);
+    setToast(`${free.length} unit siap dipindahkan`);
     setSiteFilter(targetSiteId);
     setPanel("none");
   }
@@ -427,35 +504,44 @@ function FleetInner() {
         title="Sepeda · Bikes"
         right={
           <div className="flex gap-2">
-            <Link href="/operator/pricing" className="flex items-center gap-1 text-xs font-bold text-white">
-              <Tag size={14} />
-              Harga
-            </Link>
-            <button
-              type="button"
-              className="flex items-center gap-1 text-xs font-bold text-white"
-              onClick={() => {
-                if (panel === "site" && !editingSiteId) {
-                  setPanel("none");
-                } else {
-                  openAddSite();
-                }
-              }}
-            >
-              <MapPin size={14} />
-              Tempat
-            </button>
-            <button
-              type="button"
-              className="flex items-center gap-1 text-xs font-bold text-white"
-              onClick={() => {
-                if (panel === "add") setPanel("none");
-                else openAddStock();
-              }}
-            >
-              <Plus size={14} />
-              {panel === "add" ? "Tutup" : "Stok"}
-            </button>
+            {canStaff(currentStaff, "pricing.manage") ? (
+              <Link
+                href="/operator/pricing"
+                className="flex items-center gap-1 text-xs font-bold text-white"
+              >
+                <Tag size={14} />
+                Harga
+              </Link>
+            ) : null}
+            {canManageLocations ? (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-xs font-bold text-white"
+                onClick={() => {
+                  if (panel === "site" && !editingSiteId) {
+                    setPanel("none");
+                  } else {
+                    openAddSite();
+                  }
+                }}
+              >
+                <MapPin size={14} />
+                Lokasi
+              </button>
+            ) : null}
+            {canManageFleet ? (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-xs font-bold text-white"
+                onClick={() => {
+                  if (panel === "add") setPanel("none");
+                  else openAddStock();
+                }}
+              >
+                <Plus size={14} />
+                {panel === "add" ? "Tutup" : "Stok"}
+              </button>
+            ) : null}
           </div>
         }
       />
@@ -489,7 +575,7 @@ function FleetInner() {
           name: s.name.replace(/ Lobby| Hub| Corner/g, "").trim() || s.name,
           total: locationSummaries.find((r) => r.id === s.id)?.total ?? 0,
         }))}
-        value={siteFilter === "all" ? opSites[0]?.id ?? "all" : siteFilter}
+        value={siteFilter}
         unassignedCount={
           locationSummaries.find((r) => r.id === "unassigned")?.total ?? 0
         }
@@ -498,7 +584,21 @@ function FleetInner() {
           setFilter("all");
           if (id !== "unassigned") setAddSiteId(id);
         }}
+        showAll
       />
+      <div className="mx-4 mt-2 text-[10px]" style={{ color: "var(--text2)" }}>
+        <GpsFreshness label="Fleet positions" mock />
+      </div>
+
+      {!canManageFleet && !canManageLocations ? (
+        <div
+          className="mx-4 mt-3 border-y px-1 py-3 text-xs"
+          style={{ borderColor: "var(--border)", color: "var(--text2)" }}
+        >
+          Mode lihat saja · perubahan armada dan lokasi dikunci untuk peran{" "}
+          {currentStaff?.role.replace("_", " ") ?? "ini"}.
+        </div>
+      ) : null}
 
       {siteFilter !== "all" ? (
         <div className="card !py-3">
@@ -519,8 +619,8 @@ function FleetInner() {
                     className="mt-1 text-xs"
                     style={{ color: "var(--text2)" }}
                   >
-                    Choose a location on each bike below. Unassigned bikes
-                    should not be offered for rental.
+                    Pilih lokasi untuk setiap unit di bawah. Unit tanpa lokasi
+                    tidak ditawarkan untuk disewa.
                   </p>
                 </>
               );
@@ -561,7 +661,7 @@ function FleetInner() {
                             rel="noreferrer"
                           >
                             <MessageCircle size={12} />
-                            {s.whatsapp || op?.phone || "WA not set"}
+                            {s.whatsapp || op?.phone || "WA belum diatur"}
                           </a>
                         </div>
                       );
@@ -586,7 +686,7 @@ function FleetInner() {
                       className="text-[10px]"
                       style={{ color: "var(--text2)" }}
                     >
-                      bikes assigned
+                      unit ditugaskan
                     </div>
                   </div>
                 </div>
@@ -628,11 +728,13 @@ function FleetInner() {
                   />
                   <LocationStat
                     value={summary?.attention ?? 0}
-                    label="Down"
+                    label="Perlu cek"
                     color="var(--danger)"
                   />
                 </div>
+                {canManageFleet || canManageLocations ? (
                 <div className="mt-2 flex flex-wrap gap-2">
+                  {canManageFleet ? (
                   <button
                     type="button"
                     className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold"
@@ -645,6 +747,9 @@ function FleetInner() {
                     <MoveRight size={14} />
                     Pindah sepeda siap dari sini
                   </button>
+                  ) : null}
+                  {canManageLocations ? (
+                  <>
                   <button
                     type="button"
                     className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold"
@@ -657,11 +762,11 @@ function FleetInner() {
                   <button
                     type="button"
                     className="flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-bold"
-                    style={{ background: "#FADBD8", color: "var(--danger)" }}
+                    style={{ background: "var(--danger-soft)", color: "var(--danger)" }}
                     onClick={() => {
                       if (
                         !window.confirm(
-                          `Delete ${s.name}? ${summary?.total ?? 0} idle bikes will become Unassigned.`,
+                          `Hapus ${s.name}? ${summary?.total ?? 0} unit menganggur akan menjadi Belum ditugaskan.`,
                         )
                       ) {
                         return;
@@ -672,30 +777,74 @@ function FleetInner() {
                         return;
                       }
                       setToast(
-                        `Location deleted · ${summary?.total ?? 0} bikes moved to Unassigned`,
+                        `Lokasi dihapus · ${summary?.total ?? 0} unit menjadi Belum ditugaskan`,
                       );
                       setSiteFilter("unassigned");
                       setPanel("none");
                     }}
                   >
                     <Trash2 size={14} />
-                    Delete
+                    Hapus
                   </button>
+                  </>
+                  ) : null}
                 </div>
+                ) : null}
               </>
             );
           })()}
         </div>
       ) : (
-        <div className="mx-4 mb-2">
-          <button
-            type="button"
-            className="w-full rounded-xl py-2.5 text-xs font-bold"
-            style={{ background: "var(--bg-deep)", color: "var(--primary)" }}
-            onClick={() => setPanel((p) => (p === "move" ? "none" : "move"))}
+        <div className="mx-4 mt-3 overflow-hidden border-y" style={{ borderColor: "var(--border)" }}>
+          <div
+            className="grid grid-cols-[1fr_repeat(3,44px)] gap-2 px-2 py-2 text-[10px] font-bold uppercase tracking-wide"
+            style={{ color: "var(--text2)" }}
           >
-            Pindahkan sepeda free antar lokasi
-          </button>
+            <span>Semua lokasi</span>
+            <span className="text-center">Siap</span>
+            <span className="text-center">Keluar</span>
+            <span className="text-center">Perlu cek</span>
+          </div>
+          {locationSummaries
+            .filter((row) => row.site || row.total > 0)
+            .map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                className="grid w-full grid-cols-[1fr_repeat(3,44px)] items-center gap-2 border-t px-2 py-3 text-left"
+                style={{ borderColor: "var(--border)" }}
+                onClick={() => setSiteFilter(row.id)}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-bold">
+                    {row.site?.name ?? "Belum ditugaskan"}
+                  </span>
+                  <span className="block text-[11px]" style={{ color: "var(--text2)" }}>
+                    {row.total} unit
+                    {row.site ? ` · ${row.site.area}` : ""}
+                  </span>
+                </span>
+                <span className="text-center text-sm font-bold tabular-nums" style={{ color: "var(--ok)" }}>
+                  {row.free}
+                </span>
+                <span className="text-center text-sm font-bold tabular-nums" style={{ color: "var(--primary)" }}>
+                  {row.onRent}
+                </span>
+                <span className="text-center text-sm font-bold tabular-nums" style={{ color: row.attention ? "var(--danger)" : "var(--text2)" }}>
+                  {row.attention}
+                </span>
+              </button>
+            ))}
+          {canManageFleet && opSites.length > 1 ? (
+            <button
+              type="button"
+              className="w-full border-t py-3 text-xs font-bold"
+              style={{ borderColor: "var(--border)", color: "var(--primary)" }}
+              onClick={() => setPanel((p) => (p === "move" ? "none" : "move"))}
+            >
+              Pindahkan unit siap antar lokasi
+            </button>
+          ) : null}
         </div>
       )}
 
@@ -749,14 +898,14 @@ function FleetInner() {
           <input
             className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
             style={{ borderColor: "var(--border)" }}
-            placeholder="Area / district (e.g. Kemang, Tebet)"
+            placeholder="Area / kecamatan (contoh: Kemang, Tebet)"
             value={siteArea}
             onChange={(e) => setSiteArea(e.target.value)}
           />
           <input
             className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
             style={{ borderColor: "var(--border)" }}
-            placeholder="City (e.g. Jakarta)"
+            placeholder="Kota (contoh: Jakarta)"
             value={siteCity}
             onChange={(e) => setSiteCity(e.target.value)}
           />
@@ -773,8 +922,8 @@ function FleetInner() {
               step="any"
               className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
               style={{ borderColor: "var(--border)" }}
-              placeholder="Latitude"
-              aria-label="Location latitude"
+              placeholder="Lintang"
+              aria-label="Lintang lokasi"
               value={siteLat}
               onChange={(e) => setSiteLat(e.target.value)}
             />
@@ -783,15 +932,25 @@ function FleetInner() {
               step="any"
               className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
               style={{ borderColor: "var(--border)" }}
-              placeholder="Longitude"
-              aria-label="Location longitude"
+              placeholder="Bujur"
+              aria-label="Bujur lokasi"
               value={siteLng}
               onChange={(e) => setSiteLng(e.target.value)}
             />
           </div>
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-2 rounded-lg border py-2.5 text-sm font-bold"
+            style={{ borderColor: "var(--primary)", color: "var(--primary)" }}
+            disabled={locating}
+            onClick={useCurrentLocation}
+          >
+            <LocateFixed size={16} />
+            {locating ? "Membaca GPS…" : "Gunakan lokasi GPS sekarang"}
+          </button>
           <p className="text-xs" style={{ color: "var(--text2)" }}>
-            These coordinates control discovery distance and the return
-            geofence. Copy the exact pin from OpenStreetMap.
+            Koordinat menentukan jarak pencarian dan geofence pengembalian.
+            Periksa titik di OpenStreetMap sebelum menyimpan.
           </p>
           <input
             className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
@@ -822,7 +981,7 @@ function FleetInner() {
               checked={siteDesk}
               onChange={(e) => setSiteDesk(e.target.checked)}
             />
-            Shop / give key here
+            Ada meja staf / serah kunci
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -830,7 +989,7 @@ function FleetInner() {
               checked={siteSelf}
               onChange={(e) => setSiteSelf(e.target.checked)}
             />
-            App self-collect pin
+            Bisa ambil mandiri lewat aplikasi
           </label>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -841,7 +1000,7 @@ function FleetInner() {
                 setPanel("none");
               }}
             >
-              Cancel
+              Batal
             </button>
             <button
               type="button"
@@ -854,7 +1013,9 @@ function FleetInner() {
         </div>
       ) : null}
 
-      {siteFilter !== "all" && siteFilter !== "unassigned" ? (
+      {canManageFleet &&
+      siteFilter !== "all" &&
+      siteFilter !== "unassigned" ? (
         <div className="mx-4 mt-3">
           <button
             type="button"
@@ -877,7 +1038,7 @@ function FleetInner() {
                 borderColor: "var(--border)",
                 background: "var(--card)",
               }}
-              placeholder="Search bike code…"
+              placeholder="Cari kode unit…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -885,12 +1046,12 @@ function FleetInner() {
           <div className="flex gap-2 overflow-x-auto px-4 pb-2">
             {(
               [
-                ["all", "All"],
-                ["free", "Ready"],
-                ["rented", "On rent"],
-                ["reserved", "Waiting"],
-                ["disabled", "Disabled"],
-                ["maintenance", "Maintenance"],
+                ["all", "Semua"],
+                ["free", "Siap"],
+                ["rented", "Dipinjam"],
+                ["reserved", "Dipesan"],
+                ["disabled", "Nonaktif"],
+                ["maintenance", "Perawatan"],
               ] as const
             ).map(([f, label]) => (
               <button
@@ -917,7 +1078,7 @@ function FleetInner() {
         </>
       ) : null}
 
-      {panel === "add" ? (
+      {canManageFleet && panel === "add" ? (
         <>
           <div
             className="fixed inset-0 z-[179] bg-black/40"
@@ -928,13 +1089,13 @@ function FleetInner() {
             style={{ background: "var(--card)" }}
             role="dialog"
             aria-modal="true"
-            aria-label="Add stock"
+            aria-label="Tambah stok"
           >
             <div className="flex items-center justify-between border-b px-5 py-4" style={{ borderColor: "var(--border)" }}>
               <div>
-                <div className="font-display text-lg font-semibold">Add stock</div>
+                <div className="font-display text-lg font-semibold">Tambah stok</div>
                 <p className="text-xs" style={{ color: "var(--text2)" }}>
-                  Add bikes to a location · choose model or create new
+                  Tambah unit ke lokasi · pilih model atau buat baru
                 </p>
               </div>
               <button
@@ -943,13 +1104,13 @@ function FleetInner() {
                 style={{ background: "var(--bg-deep)", color: "var(--text2)" }}
                 onClick={() => setPanel("none")}
               >
-                Close
+                Tutup
               </button>
             </div>
 
             <div className="space-y-3 overflow-y-auto px-5 py-4">
               <label className="block text-xs font-bold" style={{ color: "var(--text2)" }}>
-                Location
+                Lokasi
               </label>
               <select
                 className="w-full rounded-xl border px-3 py-3 text-sm outline-none"
@@ -965,7 +1126,7 @@ function FleetInner() {
               </select>
 
               <label className="block text-xs font-bold" style={{ color: "var(--text2)" }}>
-                Model
+                Model kendaraan
               </label>
               <div className="space-y-2">
                 {opModels.map((m) => {
@@ -997,7 +1158,7 @@ function FleetInner() {
                         <div className="text-[11px]" style={{ color: "var(--text2)" }}>
                           {vehicleTypeLabel(m.vehicleType)} ·{" "}
                           {fleet.filter((v) => v.modelId === m.id && v.siteId === activeSiteId).length}{" "}
-                          here
+                          unit di sini
                         </div>
                       </div>
                     </button>
@@ -1021,9 +1182,9 @@ function FleetInner() {
                 }}
                 aria-expanded={newModelOpen}
               >
-                <span>+ New model (not in catalog yet)</span>
+                <span>+ Model baru (belum ada di katalog)</span>
                 <span style={{ color: "var(--text2)" }}>
-                  {newModelOpen ? "Hide" : "Expand"}
+                  {newModelOpen ? "Tutup" : "Buka"}
                 </span>
               </button>
 
@@ -1035,14 +1196,14 @@ function FleetInner() {
                   <input
                     className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
                     style={{ borderColor: "var(--border)", background: "var(--card)" }}
-                    placeholder="Model name"
+                    placeholder="Nama model"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                   />
                   <input
                     className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
                     style={{ borderColor: "var(--border)", background: "var(--card)" }}
-                    placeholder="Code prefix e.g. NX"
+                    placeholder="Awalan kode, contoh NX"
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
                   />
@@ -1056,7 +1217,7 @@ function FleetInner() {
                       if (t === "bicycle") setRentalMode("key_handover");
                     }}
                   >
-                    <option value="bicycle">Bicycle · physical key</option>
+                    <option value="bicycle">Sepeda pedal · kunci fisik</option>
                     <option value="ebike">E-Bike</option>
                     <option value="emoped">E-Moped</option>
                   </select>
@@ -1067,16 +1228,16 @@ function FleetInner() {
                       value={rentalMode}
                       onChange={(e) => setRentalMode(e.target.value as RentalMode)}
                     >
-                      <option value="digital">App key</option>
-                      <option value="key_handover">Physical key</option>
-                      <option value="both">App + physical key</option>
+                      <option value="digital">Kunci aplikasi</option>
+                      <option value="key_handover">Kunci fisik</option>
+                      <option value="both">Aplikasi + kunci fisik</option>
                     </select>
                   ) : null}
                   <input
                     type="number"
                     className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
                     style={{ borderColor: "var(--border)", background: "var(--card)" }}
-                    placeholder="Price per hour"
+                    placeholder="Harga per jam"
                     value={pricePerHour}
                     onChange={(e) => setPricePerHour(Number(e.target.value) || 0)}
                   />
@@ -1084,7 +1245,7 @@ function FleetInner() {
               ) : null}
 
               <label className="block text-xs font-bold" style={{ color: "var(--text2)" }}>
-                Color
+                Warna
               </label>
               <div className="flex flex-wrap gap-2">
                 {STOCK_COLORS.map((c) => (
@@ -1109,13 +1270,13 @@ function FleetInner() {
                       className="h-3.5 w-3.5 rounded-full border border-black/10"
                       style={{ background: c.colorHex }}
                     />
-                    {c.color}
+                    {c.label}
                   </button>
                 ))}
               </div>
 
               <label className="block text-xs font-bold" style={{ color: "var(--text2)" }}>
-                Quantity
+                Jumlah unit
               </label>
               <div className="flex items-center gap-3">
                 <button
@@ -1154,7 +1315,7 @@ function FleetInner() {
                 className="btn-primary !mx-0 !mt-0 !w-full"
                 onClick={submitAdd}
               >
-                Add {stockQty} bike{stockQty > 1 ? "s" : ""}
+                Tambah {stockQty} unit
               </button>
             </div>
           </div>
@@ -1165,12 +1326,13 @@ function FleetInner() {
         <>
           <p className="section-label">
             {siteFilter === "unassigned"
-              ? "Models · unassigned"
-              : `Models at ${opSites.find((s) => s.id === siteFilter)?.name ?? "location"}`}
+              ? "Model · belum ditugaskan"
+              : `Model di ${opSites.find((s) => s.id === siteFilter)?.name ?? "lokasi"}`}
           </p>
           <ModelStockList
             models={opModels}
             units={list}
+            readOnly={!canManageFleet}
             site={
               siteFilter === "unassigned"
                 ? null
@@ -1182,18 +1344,18 @@ function FleetInner() {
                 (status === "available" || status === "disabled") &&
                 list.find((v) => v.id === id)?.status === "rented"
               ) {
-                setToast("Finish rental first");
+                setToast("Selesaikan sewa terlebih dahulu");
                 return;
               }
               updateVehicleStatus(id, status);
               setToast(
                 status === "available"
-                  ? "Marked Ready"
+                  ? "Ditandai Siap"
                   : status === "disabled"
-                    ? "Marked Disabled"
+                    ? "Ditandai Nonaktif"
                     : status === "maintenance"
-                      ? "Marked Maintenance"
-                      : "Status updated",
+                      ? "Ditandai Perawatan"
+                      : "Status diperbarui",
               );
             }}
             onMove={(id, dest) => {
@@ -1209,7 +1371,7 @@ function FleetInner() {
                 return;
               }
               moveVehicleSite(id, dest);
-              setToast(dest ? "Moved" : "Unassigned");
+              setToast(dest ? "Unit dipindahkan" : "Belum ditugaskan");
             }}
           />
         </>

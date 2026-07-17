@@ -163,6 +163,8 @@ export interface StaffMember {
   operatorId: string;
   name: string;
   role: StaffRole;
+  /** null = every operator location; otherwise only listed locations. */
+  siteIds: string[] | null;
   username: string;
   password: string;
   online: boolean;
@@ -232,6 +234,8 @@ export interface Booking {
   paymentStatus: "pending" | "paid" | "refunded";
   /** Rider's planned pickup appointment. */
   appointmentAt?: string | null;
+  /** When the booking became collectible; anchors the 15-minute arrival window. */
+  readyAt?: string | null;
   startsAt: string | null;
   endsAt: string | null;
   completedAt?: string | null;

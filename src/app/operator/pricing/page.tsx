@@ -7,6 +7,7 @@ import { AuthGate } from "@/components/AuthGate";
 import { OpSection } from "@/components/operator/OperatorUi";
 import { useAppStore } from "@/lib/store";
 import { formatIdr } from "@/lib/format";
+import { canStaff, getCurrentStaff } from "@/lib/permissions";
 
 export default function PricingPage() {
   return (
@@ -23,6 +24,9 @@ function PricingInner() {
   const updatePricing = useAppStore((s) => s.updatePricing);
   const setWeekendSurcharge = useAppStore((s) => s.setWeekendSurcharge);
   const setToast = useAppStore((s) => s.setToast);
+  const staff = useAppStore((s) => s.staff);
+  const currentStaff = getCurrentStaff(user, staff);
+  const canManagePricing = canStaff(currentStaff, "pricing.manage");
 
   const opId = user.operatorId!;
   const tiers = pricing[opId] ?? [];
@@ -31,7 +35,9 @@ function PricingInner() {
     <div className="content-pad">
       <Header title="Atur harga · Prices" backHref="/operator" />
       <p className="px-4 pt-2 text-xs" style={{ color: "var(--text2)" }}>
-        Isi harga sewa dalam Rupiah (Rp). Contoh: 50000 = Rp 50.000
+        {canManagePricing
+          ? "Isi harga sewa dalam Rupiah (Rp). Contoh: 50000 = Rp 50.000"
+          : "Mode lihat saja · hanya admin yang dapat mengubah harga."}
       </p>
 
       <OpSection
@@ -56,6 +62,7 @@ function PricingInner() {
                   className="w-28 rounded-lg border px-3 py-2 text-right text-sm outline-none"
                   style={{ borderColor: "var(--border)", background: "var(--bg)" }}
                   inputMode="numeric"
+                  disabled={!canManagePricing}
                   value={t.priceIdr}
                   onChange={(e) => {
                     const next = tiers.map((x, idx) =>
@@ -91,6 +98,7 @@ function PricingInner() {
             background: weekendSurcharge[opId] ? "var(--primary)" : "var(--border)",
           }}
           onClick={() => setWeekendSurcharge(opId, !weekendSurcharge[opId])}
+          disabled={!canManagePricing}
         >
           <span
             className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
@@ -99,6 +107,7 @@ function PricingInner() {
         </button>
       </div>
 
+      {canManagePricing ? (
       <button
         type="button"
         className="btn-primary"
@@ -110,6 +119,7 @@ function PricingInner() {
       >
         Simpan harga
       </button>
+      ) : null}
       <BottomNav variant="operator" />
     </div>
   );

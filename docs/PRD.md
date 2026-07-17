@@ -3,9 +3,9 @@
 | Field | Value |
 |-------|--------|
 | **Product** | Casan Rent |
-| **Product version** | **0.4.9** (must match `APP_VERSION` in `src/lib/version.ts`) |
+| **Product version** | **0.5.1** (must match `APP_VERSION` in `src/lib/version.ts`) |
 | **Document** | PRD (living) — revise on every product version |
-| **Status** | Current as of **v0.4.9** · 2026-07-16 |
+| **Status** | Current as of **v0.5.1** · 2026-07-17 |
 | **Live demo** | https://casan-rent.vercel.app |
 | **Repo** | https://github.com/CASANMGT/casan-rent |
 | **Audience** | Product, design, engineering, ops, partners |
@@ -201,6 +201,9 @@ A model may support combinations; e-mopeds often require **SIM acknowledgement**
 | R-D8 | Map toggle on Hubs is **Approximate map · demo**; **Directions (OSM)** primary for navigation | P0 |
 | R-D9 | Resume banners: active ride · pay to continue · ready to collect (priority order) | P0 |
 | R-D10 | Pay / ready banners show **hub name** + appointment when set | P1 |
+| R-D11 | First rider Home visit shows a dismissible 3-step bottom sheet: **Find → Book/pay → Collect**; explicitly state the rental timer starts at collect/unlock | P1 |
+| R-D12 | Home shows compact, advisory-only city weather and dismissible city-aware safety tips; safety tips can be reopened from Profile | P1 |
+| R-D13 | Discovery shows estimated walk minutes + distance; ride and fleet surfaces state GPS freshness and identify demo telemetry | P1 |
 
 ### 8.2 Hub detail (`/operators/[id]`)
 
@@ -252,6 +255,7 @@ A model may support combinations; e-mopeds often require **SIM acknowledgement**
 | R-C6 | Complete → review stars + note → home | P0 |
 | R-C7 | SOS shares **rider GPS** (fallback demo pin); not operator HQ | P1 |
 | R-C8 | Check-in / return maps labeled approximate; OSM directions available | P1 |
+| R-C9 | Once ready, confirmed and handover screens show a non-blocking **15-minute collection countdown**; the rental duration still starts only at collect/unlock | P1 |
 
 ### 8.6 Trips, notifications, profile
 
@@ -261,6 +265,7 @@ A model may support combinations; e-mopeds often require **SIM acknowledgement**
 | R-T2 | Trip cards show hub name + appointment when available | P1 |
 | R-N1 | Notifications tappable via `href` / bookingId; per-item read | P0 |
 | R-F1 | Profile: dark mode, What’s New, referral display (demo), reset demo when `IS_DEMO` | P1 |
+| R-F2 | Profile provides an entry to reopen city-aware safety and local riding tips | P1 |
 
 ---
 
@@ -274,6 +279,8 @@ A model may support combinations; e-mopeds often require **SIM acknowledgement**
 | O-H2 | Alerts: overdue, awaiting cash, keys out | P0 |
 | O-H3 | Inline Terima / Tolak for pending | P0 |
 | O-H4 | **Lokasi aktif** filter (Semua + chips) scopes stats & queues; shared with Orders | P0 |
+| O-H5 | Non-admin staff only see hubs included in their `siteIds` assignment | P0 |
+| O-H6 | Every pending request shows relative age; age turns amber at **5 min** and red at **10 min** | P1 |
 
 ### 9.2 Orders
 
@@ -286,6 +293,7 @@ A model may support combinations; e-mopeds often require **SIM acknowledgement**
 | O-O5 | Filter by active lokasi | P0 |
 | O-O6 | Demo: simulate rider request when `IS_DEMO` | P1 |
 | O-O7 | Bottom nav **Orders badge**: pending queue + overdue + awaiting cash + keys out (scoped by lokasi) | P1 |
+| O-O8 | Booking mutations require `bookings.manage` and an assigned booking site | P0 |
 
 ### 9.3 Fleet
 
@@ -295,6 +303,9 @@ A model may support combinations; e-mopeds often require **SIM acknowledgement**
 | O-F2 | Unit status: Ready / Out / Maintenance / Disabled (+ charging where used) | P0 |
 | O-F3 | Move unit between lokasi; add stock modal (model, color, qty) | P0 |
 | O-F4 | Create/edit lokasi (hours, WA, store info, coords) | P1 |
+| O-F5 | **Semua** overview compares each assigned lokasi: total, ready, out, attention | P1 |
+| O-F6 | New/edit lokasi can fill lat/lng from device GPS with accuracy feedback | P1 |
+| O-F7 | Fleet status/move/add mutations require `fleet.manage`; location CRUD requires `locations.manage` | P0 |
 
 ### 9.4 Earnings, pricing, staff
 
@@ -304,7 +315,25 @@ A model may support combinations; e-mopeds often require **SIM acknowledgement**
 | O-E2 | Breakdown: rental / add-ons / extensions; by lokasi & method | P1 |
 | O-E3 | **Lokasi** filter (shared `operatorActiveSiteId`) scopes earnings like Home/Orders | P1 |
 | O-P1 | Edit duration tiers; weekend surcharge toggle | P1 |
-| O-S1 | List staff with roles; invite is demo chrome until real backend | P2 |
+| O-P2 | Pricing mutations require `pricing.manage` | P0 |
+| O-S1 | Staff have `siteIds: string[] \| null`; `null` means every operator hub | P0 |
+| O-S2 | Admin can assign staff to all or selected hubs; assignment scopes UI and mutations | P0 |
+| O-S3 | Role permissions are enforced in Zustand mutations, not labels only | P0 |
+| O-S4 | Fake invite action removed; real account invitation remains backend scope | P2 |
+
+### 9.5 Operator permission matrix
+
+| Role | Bookings | Fleet | Locations | Pricing | Staff assignments |
+|------|----------|-------|-----------|---------|-------------------|
+| `admin` | Manage | Manage | Manage | Manage | Manage |
+| `booking_manager` | Manage at assigned hubs | View | View | View | View |
+| `fleet_attendant` | View | Status / move / add at assigned hubs | View | View | View |
+| `viewer` | View | View | View | View | View |
+
+All operator surfaces scope visible bookings, units, earnings, badges, and hub
+switchers to the signed-in staff member’s assigned `siteIds`. These are real
+client-store gates for the demo architecture; production authorization must
+repeat the same matrix server-side with Supabase RLS.
 
 ---
 
@@ -318,7 +347,7 @@ Operator 1──* Booking
 Booking *──1 Vehicle (assigned)
 Booking *──0..1 OperatorSite
 Booking *──* ChargingAddon (snapshot on order)
-Operator 1──* StaffMember
+Operator 1──* StaffMember ──* OperatorSite (siteIds scope)
 ```
 
 ### Booking lifecycle
@@ -344,6 +373,8 @@ active → overdue (timer elapsed / mark overdue)
 | Min battery to assign | **≥ 30%** (null OK for pedal bikes) |
 | Platform fee | **14–22%** in seed (configurable per operator; UI default fallback 15%) |
 | Rental timer start | Check-in unlock **or** key handover / start ride — **not** payment time |
+| Ready-to-collect arrival window | **15 min**, advisory countdown; expiry does not auto-cancel |
+| Pending request SLA cues | Amber at **5 min**; red at **10 min** |
 | Booking code | `CR-` + short code |
 | Referral (demo UI) | `CASAN25` · Rp 25K credit label |
 
@@ -449,6 +480,7 @@ Gates: simulate operator confirm, simulate key handoff/return, simulate geofence
 | Advance booking for a day ≥ 1 ahead | Yes |
 | Operator filters Orders by lokasi | Yes |
 | Deployed production URL | casan-rent.vercel.app |
+| Staff role cannot mutate outside permission/site assignment | Yes (demo store); server RLS required for production |
 
 ### Future (Phase 2+)
 
@@ -458,21 +490,24 @@ Gates: simulate operator confirm, simulate key handoff/return, simulate geofence
 
 ## 16. Roadmap
 
-### Shipped (through v0.4.9)
+### Shipped (through v0.5.1)
 
 - Multi-operator PWA, hub-first discovery, Book now / Book later  
 - Lean booking + refundable deposit highlight  
 - Operator lokasi filter (Home, Orders, Earnings), fleet model stock, earnings clarity  
 - UX P0/P1: distance from site, key-return escape, AuthGate mid-funnel, notifications deep links, lexicon  
 - UX P2: honest maps + OSM directions, Unlock check-in, Orders nav badge, hub+time on banners/Trips, SOS rider GPS, cancel unpaid  
+- Operator Phase 1.5: Fleet Semua comparison, GPS-assisted lokasi, staff `siteIds`, enforced role/site mutation gates
+- ID-first fleet forms, flatter fleet/staff lists, semantic status tokens with dark-mode variants
+- Guided rider discovery: 3-step welcome, city safety/weather, walk ETA, and GPS freshness
+- Time-aware operations: pending-request SLA age colors and 15-minute ready-to-collect countdown
 
 ### Phase 1.5 (near-term)
 
-- Fleet Semua overview + GPS assist for new lokasi  
-- Collapse remaining card clutter; motion on sticky/banners  
-- Staff ↔ siteIds + real role gates  
-- Align Supabase schema with `OperatorSite`  
-- Design-token pass (fewer hard-coded greens)  
+- Extend flat-list + semantic-token pass to remaining rider surfaces
+- Real staff invitation / account lifecycle
+- Align Supabase schema with `OperatorSite` + staff-site membership
+- Server-side permission enforcement / Supabase RLS
 
 ### Phase 2
 
@@ -492,13 +527,14 @@ Gates: simulate operator confirm, simulate key handoff/return, simulate geofence
 
 | Topic | Current state | Recommendation |
 |-------|---------------|----------------|
-| Staff permissions | Labels only | Enforce on mutations |
+| Staff permissions | Enforced in client store + site-scoped UI | Mirror with server auth/RLS before production |
 | Maps | Labeled Approximate + OSM directions | Keep honest; live GPS later |
 | Saved favorites | Removed from nav (v0.4.6) | Keep out unless demand |
 | Deposit amount | Fixed Rp 200k | Per-operator or per-type later |
 | SCBD / Kelapa Gading | Mentioned in older changelog only | Re-add as hubs when needed |
 | `card` payment method | In types, not in checkout UI | Add or remove from types |
-| Design density | Still card-heavy in places | Flatten lists; semantic tokens |
+| Staff invitation | Fake action removed | Add real account lifecycle with backend |
+| Design density | Fleet/staff flattened; rider screens still mixed | Continue semantic-token / flat-list pass |
 
 ---
 
@@ -508,6 +544,8 @@ PRD revisions are keyed to **product versions**. Each app release that changes p
 
 | Product version | Date | PRD changes |
 |-----------------|------|-------------|
+| **0.5.1** | 17 Jul 2026 | Guided discovery, city weather/safety, walk ETA, GPS freshness, pending request SLA age cues, and non-blocking 15-minute collection window; requirements R-D11–13, R-C9, R-F2, O-H6 |
+| **0.5.0** | 17 Jul 2026 | Operator Phase 1.5: Fleet Semua + GPS, staff `siteIds`, role/site mutation gates, ID-first fleet forms, flatter lists, semantic status tokens; roadmap and permission matrix updated |
 | **0.4.9** | 16 Jul 2026 | UX P2: maps honesty, check-in unlock, Orders badge, banners/Trips hub+time, SOS GPS, Earnings lokasi, cancel unpaid; requirements R-D10, R-P6, R-C7–8, R-T2, O-O7, O-E3 |
 | **0.4.8** | 16 Jul 2026 | Living PRD rewrite: hub-first discovery, Book now/later, lean booking, lokasi filter, lexicon, business rules; **version-sync policy** added |
 | 0.4.7 and earlier | Jul 2026 | Covered by legacy PRD v1.0–v1.1 drafts (EcoRide → Indonesia multi-type) |

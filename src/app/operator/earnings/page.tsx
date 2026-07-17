@@ -23,6 +23,7 @@ import {
   paymentMethodLabel,
 } from "@/lib/format";
 import type { Booking } from "@/lib/types";
+import { canAccessSite, getCurrentStaff } from "@/lib/permissions";
 
 export default function EarningsPage() {
   return (
@@ -81,6 +82,8 @@ function EarningsInner() {
   const sites = useAppStore((s) => s.sites);
   const operatorActiveSiteId = useAppStore((s) => s.operatorActiveSiteId);
   const setOperatorActiveSiteId = useAppStore((s) => s.setOperatorActiveSiteId);
+  const staff = useAppStore((s) => s.staff);
+  const currentStaff = getCurrentStaff(user, staff);
   const [period, setPeriod] = useState<Period>("week");
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -90,15 +93,24 @@ function EarningsInner() {
   const prev = prevPeriodRange(period);
 
   const opSites = useMemo(
-    () => sites.filter((s) => s.operatorId === user.operatorId),
-    [sites, user.operatorId],
+    () =>
+      sites.filter(
+        (site) =>
+          site.operatorId === user.operatorId &&
+          canAccessSite(currentStaff, site.id),
+      ),
+    [sites, user.operatorId, currentStaff],
   );
 
   const opBookings = useMemo(() => {
-    const all = bookings.filter((b) => b.operatorId === user.operatorId);
+    const all = bookings.filter(
+      (booking) =>
+        booking.operatorId === user.operatorId &&
+        canAccessSite(currentStaff, booking.siteId),
+    );
     if (!operatorActiveSiteId) return all;
     return all.filter((b) => b.siteId === operatorActiveSiteId);
-  }, [bookings, user.operatorId, operatorActiveSiteId]);
+  }, [bookings, user.operatorId, operatorActiveSiteId, currentStaff]);
 
   const mine = useMemo(
     () =>
@@ -398,11 +410,11 @@ function EarningsInner() {
       {awaitingCash.length > 0 ? (
         <div
           className="mx-4 mt-3 flex gap-3 rounded-2xl border px-4 py-3"
-          style={{ background: "#FEF5E7", borderColor: "var(--warn)" }}
+          style={{ background: "var(--warning-soft)", borderColor: "var(--warn)" }}
         >
-          <CircleAlert size={20} className="mt-0.5 shrink-0" style={{ color: "#9A5B00" }} />
+          <CircleAlert size={20} className="mt-0.5 shrink-0" style={{ color: "var(--text-warn)" }} />
           <div>
-            <div className="text-sm font-bold" style={{ color: "#9A5B00" }}>
+            <div className="text-sm font-bold" style={{ color: "var(--text-warn)" }}>
               {awaitingCash.length} bayar di toko belum dikonfirmasi
             </div>
             <div className="text-xs" style={{ color: "var(--text2)" }}>

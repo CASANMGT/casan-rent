@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.4.9";
+export const APP_VERSION = "0.5.1";
 
 export interface ChangelogEntry {
   version: string;
@@ -9,6 +9,26 @@ export interface ChangelogEntry {
 
 /** Newest first — shown in What's New for riders and operators. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.5.1",
+    date: "2026-07-17",
+    title: "Guided discovery & time-aware pickup",
+    highlights: [
+      "Dismissible Find → Book/pay → Collect welcome, plus city-aware safety tips reopened from Profile",
+      "Home weather advice and walk-time estimates; GPS freshness on ride and fleet views",
+      "Pending requests show SLA age colors; ready bookings get a 15-minute collection countdown",
+    ],
+  },
+  {
+    version: "0.5.0",
+    date: "2026-07-17",
+    title: "Operator Phase 1.5: fleet overview & role gates",
+    highlights: [
+      "Fleet Semua compares every assigned location; GPS can fill new-location coordinates",
+      "Staff assignments now use siteIds; roles enforce booking, fleet, location, pricing, and staff mutations",
+      "Fleet forms are ID-first with flatter lists and semantic status colors that support dark mode",
+    ],
+  },
   {
     version: "0.4.9",
     date: "2026-07-16",

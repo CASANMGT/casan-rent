@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useMemo, useState } from "react";
 import {
   Battery,
@@ -23,17 +24,17 @@ function statusMeta(status: VehicleStatus): {
 } {
   switch (status) {
     case "available":
-      return { label: "Ready", color: "var(--ok)", bg: "#E8F8F5" };
+      return { label: "Siap", color: "var(--ok)", bg: "var(--success-soft)" };
     case "rented":
-      return { label: "On rent", color: "var(--primary)", bg: "#E8F4F8" };
+      return { label: "Dipinjam", color: "var(--digital)", bg: "var(--info-soft)" };
     case "reserved":
-      return { label: "Waiting", color: "var(--warn)", bg: "#FEF5E7" };
+      return { label: "Dipesan", color: "var(--text-warn)", bg: "var(--warning-soft)" };
     case "maintenance":
-      return { label: "Maintenance", color: "var(--danger)", bg: "#FADBD8" };
+      return { label: "Perawatan", color: "var(--danger)", bg: "var(--danger-soft)" };
     case "disabled":
-      return { label: "Disabled", color: "#6B7280", bg: "#F3F4F6" };
+      return { label: "Nonaktif", color: "var(--neutral)", bg: "var(--neutral-soft)" };
     case "charging":
-      return { label: "Charging", color: "#B45309", bg: "#FEF5E7" };
+      return { label: "Mengisi daya", color: "var(--text-warn)", bg: "var(--warning-soft)" };
     default:
       return { label: status, color: "var(--text2)", bg: "var(--bg-deep)" };
   }
@@ -47,19 +48,19 @@ function KeyIcons({ mode }: { mode: Vehicle["rentalMode"] }) {
       {digital ? (
         <span
           className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-          style={{ background: "#E8F4F8", color: "var(--primary)" }}
-          title="Digital / app key"
+          style={{ background: "var(--digital-soft)", color: "var(--digital)" }}
+          title="Kunci digital / aplikasi"
         >
-          <Smartphone size={11} /> App
+          <Smartphone size={11} /> Aplikasi
         </span>
       ) : null}
       {physical ? (
         <span
           className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
-          style={{ background: "#FEF5E7", color: "#9A5B00" }}
-          title="Physical shop key"
+          style={{ background: "var(--key-soft)", color: "var(--key)" }}
+          title="Kunci fisik"
         >
-          <KeyRound size={11} /> Key
+          <KeyRound size={11} /> Fisik
         </span>
       ) : null}
     </div>
@@ -131,12 +132,12 @@ export function LocationSwitcher({
             borderColor:
               value === "unassigned" ? "var(--warn)" : "var(--border)",
             background:
-              value === "unassigned" ? "#FEF5E7" : "var(--card)",
-            color: value === "unassigned" ? "#9A5B00" : "var(--text2)",
+              value === "unassigned" ? "var(--warning-soft)" : "var(--card)",
+            color: value === "unassigned" ? "var(--text-warn)" : "var(--text2)",
           }}
           onClick={() => onChange("unassigned")}
         >
-          Unassigned
+          Belum ditugaskan
           <span className="ml-1.5 tabular-nums opacity-80">
             {unassignedCount}
           </span>
@@ -153,6 +154,7 @@ export function ModelStockList({
   onStatus,
   onMove,
   moveSites,
+  readOnly = false,
 }: {
   models: VehicleModel[];
   units: Vehicle[];
@@ -160,6 +162,7 @@ export function ModelStockList({
   onStatus: (vehicleId: string, status: VehicleStatus) => void;
   onMove: (vehicleId: string, siteId: string) => void;
   moveSites: OperatorSite[];
+  readOnly?: boolean;
 }) {
   const [openModelId, setOpenModelId] = useState<string | null>(null);
 
@@ -189,13 +192,13 @@ export function ModelStockList({
   if (groups.length === 0) {
     return (
       <p className="mx-4 py-8 text-center text-sm" style={{ color: "var(--text2)" }}>
-        No bikes at this location yet. Use stock +/− or Add.
+        Belum ada unit di lokasi ini.
       </p>
     );
   }
 
   return (
-    <div className="mx-4 space-y-2.5 pb-2">
+    <div className="mx-4 divide-y border-y pb-2" style={{ borderColor: "var(--border)" }}>
       {groups.map(({ model, modelId, bikes }) => {
         const open = openModelId === modelId;
         const photo = model?.images[0] ?? "/vehicles/ebike.svg";
@@ -218,8 +221,7 @@ export function ModelStockList({
         return (
           <div
             key={modelId}
-            className="overflow-hidden rounded-2xl border"
-            style={{ borderColor: "var(--border)", background: "var(--card)" }}
+            className="overflow-hidden"
           >
             <button
               type="button"
@@ -229,9 +231,11 @@ export function ModelStockList({
               }
               aria-expanded={open}
             >
-              <img
+              <Image
                 src={photo}
                 alt={name}
+                width={56}
+                height={56}
                 className="h-14 w-14 shrink-0 rounded-xl object-cover"
                 style={{ background: "var(--bg-deep)" }}
               />
@@ -246,14 +250,14 @@ export function ModelStockList({
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <KeyIcons mode={mode} />
                   <span className="text-[11px] font-semibold tabular-nums">
-                    <span style={{ color: "var(--ok)" }}>{ready} ready</span>
+                    <span style={{ color: "var(--ok)" }}>{ready} siap</span>
                     {" · "}
-                    <span style={{ color: "var(--primary)" }}>{onRent} out</span>
+                    <span style={{ color: "var(--primary)" }}>{onRent} keluar</span>
                     {waiting > 0 ? (
                       <>
                         {" · "}
                         <span style={{ color: "var(--warn)" }}>
-                          {waiting} wait
+                          {waiting} dipesan
                         </span>
                       </>
                     ) : null}
@@ -261,7 +265,7 @@ export function ModelStockList({
                       <>
                         {" · "}
                         <span style={{ color: "var(--danger)" }}>
-                          {down} down
+                          {down} perlu cek
                         </span>
                       </>
                     ) : null}
@@ -271,7 +275,7 @@ export function ModelStockList({
               <div className="text-right">
                 <div className="text-xl font-bold tabular-nums">{bikes.length}</div>
                 <div className="text-[10px]" style={{ color: "var(--text2)" }}>
-                  bikes
+                  unit
                 </div>
                 {open ? (
                   <ChevronUp size={16} className="ml-auto mt-1" />
@@ -283,7 +287,7 @@ export function ModelStockList({
 
             {open ? (
               <div
-                className="space-y-2 border-t px-3 py-3"
+                className="divide-y border-t px-3"
                 style={{ borderColor: "var(--border)" }}
               >
                 {bikes
@@ -299,17 +303,15 @@ export function ModelStockList({
                     return (
                       <div
                         key={v.id}
-                        className="rounded-xl border p-2.5"
-                        style={{
-                          borderColor: "var(--border)",
-                          background: "var(--bg)",
-                        }}
+                        className="py-3"
                       >
                         <div className="flex gap-2.5">
                           <div className="relative shrink-0">
-                            <img
+                            <Image
                               src={unitPhoto}
                               alt={`${v.name} ${v.code}`}
+                              width={64}
+                              height={64}
                               className="h-16 w-16 rounded-lg object-cover"
                               style={{ background: "var(--bg-deep)" }}
                             />
@@ -330,7 +332,11 @@ export function ModelStockList({
                                   style={{ color: "var(--text2)" }}
                                 >
                                   {v.color || "—"}
-                                  {site ? ` · ${site.name}` : " · Unassigned"}
+                                  {" · "}
+                                  {site?.name ??
+                                    moveSites.find((s) => s.id === v.siteId)
+                                      ?.name ??
+                                    "Belum ditugaskan"}
                                 </div>
                               </div>
                               <span
@@ -371,6 +377,7 @@ export function ModelStockList({
                           </div>
                         </div>
 
+                        {!readOnly ? (
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {v.status !== "available" &&
                           v.status !== "rented" &&
@@ -381,7 +388,7 @@ export function ModelStockList({
                               style={{ background: "var(--ok)" }}
                               onClick={() => onStatus(v.id, "available")}
                             >
-                              Ready
+                              Siap
                             </button>
                           ) : null}
                           {v.status !== "disabled" &&
@@ -391,12 +398,12 @@ export function ModelStockList({
                               type="button"
                               className="rounded-lg px-2.5 py-1.5 text-[11px] font-bold"
                               style={{
-                                background: "#F3F4F6",
-                                color: "#4B5563",
+                                background: "var(--neutral-soft)",
+                                color: "var(--neutral)",
                               }}
                               onClick={() => onStatus(v.id, "disabled")}
                             >
-                              Disable
+                              Nonaktifkan
                             </button>
                           ) : null}
                           {v.status !== "maintenance" &&
@@ -405,12 +412,12 @@ export function ModelStockList({
                               type="button"
                               className="rounded-lg px-2.5 py-1.5 text-[11px] font-bold"
                               style={{
-                                background: "#FADBD8",
+                                background: "var(--danger-soft)",
                                 color: "var(--danger)",
                               }}
                               onClick={() => onStatus(v.id, "maintenance")}
                             >
-                              Maintenance
+                              Perawatan
                             </button>
                           ) : null}
                           <select
@@ -420,7 +427,7 @@ export function ModelStockList({
                             onChange={(e) => onMove(v.id, e.target.value)}
                             aria-label={`Move ${v.code}`}
                           >
-                            <option value="">Unassigned</option>
+                            <option value="">Belum ditugaskan</option>
                             {moveSites.map((s) => (
                               <option key={s.id} value={s.id}>
                                 → {s.name}
@@ -428,6 +435,7 @@ export function ModelStockList({
                             ))}
                           </select>
                         </div>
+                        ) : null}
                       </div>
                     );
                   })}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import {
-  formatDistance,
+  formatWalkEta,
   formatIdrShort,
   modeLabel,
   batteryPctLabel,
@@ -31,6 +31,7 @@ import {
   modelBatteryLabel,
 } from "@/lib/catalog";
 import { MockMap } from "@/components/MockMap";
+import { HomeGuidance, WeatherStrip } from "@/components/UxSignals";
 
 /** Default discovery: hubs (locations). Bikes are secondary. */
 type Tab = "hubs" | "vehicles";
@@ -131,7 +132,7 @@ function HomeInner() {
             </h1>
             <p className="mt-1 text-xs text-white/90">
               {nearestHub
-                ? `${freeNearby} bikes · nearest ${nearestHub.site.name} · ${formatDistance(nearestHub.distKm)}`
+                ? `${freeNearby} bikes · nearest ${nearestHub.site.name} · ${formatWalkEta(nearestHub.distKm)}`
                 : "Find a pickup hub near you"}
             </p>
           </div>
@@ -262,6 +263,9 @@ function HomeInner() {
           </span>
         </Link>
       ) : null}
+
+      <WeatherStrip city={nearestHub?.site.city ?? "Jakarta"} />
+      <HomeGuidance city={nearestHub?.site.city ?? "Jakarta"} />
 
       <div
         className="mx-4 mt-3 flex items-center gap-2 rounded-xl px-3 py-3 shadow-sm"
@@ -410,7 +414,7 @@ function HomeInner() {
               meta={`${h.availableCount} bikes free`}
               hours={h.site.hours}
               ratingAvg={h.ratingAvg}
-              distance={formatDistance(h.distKm)}
+              distance={formatWalkEta(h.distKm)}
             />
           ))}
         </div>
@@ -457,7 +461,7 @@ function HomeInner() {
                         color: "var(--primary)",
                       }}
                     >
-                      {formatDistance(row.distKm)}
+                      {formatWalkEta(row.distKm)}
                     </span>
                   </div>
                   <div
