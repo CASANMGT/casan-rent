@@ -11,8 +11,10 @@ import {
   formatReturnBy,
   modeLabel,
   vehicleTypeLabel,
+  applyWeekendSurcharge,
+  RETURN_GEOFENCE_M,
 } from "@/lib/format";
-import type { PickupType } from "@/lib/types";
+import type { KeysAccess, PickupType } from "@/lib/types";
 import { PhotoGallery } from "@/components/PhotoGallery";
 import {
   adaptersForVoltage,
@@ -99,6 +101,8 @@ function ModelDetailInner() {
   const reviews = useAppStore((s) => s.reviews);
   const bookings = useAppStore((s) => s.bookings);
   const chargingAddons = useAppStore((s) => s.chargingAddons);
+  const weekendSurcharge = useAppStore((s) => s.weekendSurcharge);
+  const walletBalanceIdr = useAppStore((s) => s.walletBalanceIdr);
   const createBooking = useAppStore((s) => s.createBooking);
   const setToast = useAppStore((s) => s.setToast);
 
@@ -143,6 +147,10 @@ function ModelDetailInner() {
   const [pickup, setPickup] = useState<PickupType>(
     model?.allowFrontDesk ? "front_desk" : "self_service",
   );
+  /** When model allows both: digital (app) vs physical (desk key). */
+  const [keyChoice, setKeyChoice] = useState<"digital" | "physical">(() =>
+    model?.rentalMode === "key_handover" ? "physical" : "digital",
+  );
   const [tierIdx, setTierIdx] = useState(0);
   const [simAck, setSimAck] = useState(false);
   const [voucherId, setVoucherId] = useState<string | null>(null);
@@ -186,7 +194,13 @@ function ModelDetailInner() {
     (a) => a.id === voucherId || a.id === adapterId,
   );
   const addonsTotal = selectedAddons.reduce((s, a) => s + a.priceIdr, 0);
-  const total = tier.priceIdr + addonsTotal + DEPOSIT_IDR;
+  const weekend = applyWeekendSurcharge(
+    tier.priceIdr,
+    Boolean(model && weekendSurcharge[model.operatorId]),
+    appointmentInput,
+  );
+  const rentalPriceIdr = weekend.priceIdr;
+  const total = rentalPriceIdr + addonsTotal + DEPOSIT_IDR;
   const selectedAdapter = adapters.find((a) => a.id === adapterId);
   const selectedSite =
     availableSites.find(({ site }) => site.id === selectedSiteId)?.site ??
@@ -215,14 +229,29 @@ function ModelDetailInner() {
     const addonIds = [voucherId, adapterId].filter(
       (x): x is string => Boolean(x),
     );
+    const keysAccess: KeysAccess =
+      model!.rentalMode === "both"
+        ? keyChoice === "physical"
+          ? "physical"
+          : "digital"
+        : model!.rentalMode === "key_handover"
+          ? "physical"
+          : "digital";
+    const resolvedPickup: PickupType =
+      keysAccess === "physical" ? "front_desk" : pickup;
+    const totalDue = rentalPriceIdr + addonsTotal + DEPOSIT_IDR;
+    const paymentMethod =
+      walletBalanceIdr >= totalDue ? "casan_wallet" : "pay_at_operator";
     const booking = createBooking({
       modelId: model!.id,
       siteId: selectedSite?.id,
-      pickupType: pickup,
+      pickupType: resolvedPickup,
+      keysAccess,
+      digitalKeyIssueMode: "auto",
       durationLabel: tier.label,
       durationMinutes: tier.durationMinutes,
-      rentalPriceIdr: tier.priceIdr,
-      paymentMethod: "qris",
+      rentalPriceIdr,
+      paymentMethod,
       addonIds,
       appointmentAt: new Date(appointmentMs).toISOString(),
     });
@@ -232,9 +261,11 @@ function ModelDetailInner() {
     }
     const collectLabel = formatReturnBy(new Date(appointmentMs).toISOString());
     setToast(
-      whenMode === "later"
-        ? `Reserved — collect ${collectLabel}`
-        : "Booking created — continue to payment",
+      weekend.applied
+        ? `Booking created · weekend +15% applied`
+        : whenMode === "later"
+          ? `Reserved — collect ${collectLabel}`
+          : "Booking created — continue to payment",
     );
     router.push(`/book/${booking.id}`);
   }
@@ -509,8 +540,85 @@ function ModelDetailInner() {
         ) : null}
       </div>
 
-      {(model.allowFrontDesk && model.allowSelfService && model.rentalMode === "digital") ||
-      (model.allowFrontDesk && model.allowSelfService && model.rentalMode === "both") ? (
+      {model.rentalMode === "both" ? (
+        <>
+          <p className="section-label">Key option</p>
+          <div className="mx-4 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              className="rounded-xl border-2 px-3 py-3 text-left"
+              style={{
+                borderColor:
+                  keyChoice === "digital" ? "var(--primary)" : "var(--border)",
+                background:
+                  keyChoice === "digital"
+                    ? "color-mix(in srgb, var(--primary) 10%, white)"
+                    : "var(--card)",
+              }}
+              onClick={() => {
+                setKeyChoice("digital");
+                setPickup("self_service");
+              }}
+            >
+              <div
+                className="text-xs font-bold"
+                style={{
+                  color:
+                    keyChoice === "digital" ? "var(--primary)" : "var(--text)",
+                }}
+              >
+                Digital key
+              </div>
+              <p className="mt-1 text-[11px] leading-snug" style={{ color: "var(--text2)" }}>
+                App unlock · motor on/off · return at any listed hub
+              </p>
+            </button>
+            <button
+              type="button"
+              className="rounded-xl border-2 px-3 py-3 text-left"
+              style={{
+                borderColor:
+                  keyChoice === "physical" ? "var(--primary)" : "var(--border)",
+                background:
+                  keyChoice === "physical"
+                    ? "color-mix(in srgb, var(--primary) 10%, white)"
+                    : "var(--card)",
+              }}
+              onClick={() => {
+                setKeyChoice("physical");
+                setPickup("front_desk");
+              }}
+            >
+              <div
+                className="text-xs font-bold"
+                style={{
+                  color:
+                    keyChoice === "physical" ? "var(--primary)" : "var(--text)",
+                }}
+              >
+                Physical key
+              </div>
+              <p className="mt-1 text-[11px] leading-snug" style={{ color: "var(--text2)" }}>
+                Staff hand over key · return to desk
+              </p>
+            </button>
+          </div>
+        </>
+      ) : model.rentalMode === "digital" ? (
+        <p className="mx-4 mt-3 text-xs" style={{ color: "var(--text2)" }}>
+          Digital key · app unlock and motor control · return at any of this
+          operator&apos;s hubs (within {RETURN_GEOFENCE_M} m)
+        </p>
+      ) : (
+        <p className="mx-4 mt-3 text-xs" style={{ color: "var(--text2)" }}>
+          Shop pickup required · staff hand over the key
+        </p>
+      )}
+
+      {(model.allowFrontDesk &&
+        model.allowSelfService &&
+        (model.rentalMode === "digital" ||
+          (model.rentalMode === "both" && keyChoice === "digital"))) ? (
         <>
           <p className="section-label">Pickup style</p>
           <div className="mx-4 grid grid-cols-2 gap-2">
@@ -554,10 +662,6 @@ function ModelDetailInner() {
             ) : null}
           </div>
         </>
-      ) : model.rentalMode === "both" || model.rentalMode === "key_handover" ? (
-        <p className="mx-4 mt-3 text-xs" style={{ color: "var(--text2)" }}>
-          Shop pickup required · staff hand over the key
-        </p>
       ) : null}
 
       <p className="section-label">Book now or later</p>
@@ -690,8 +794,8 @@ function ModelDetailInner() {
             className="mt-1"
           />
           <span>
-            I confirm I hold a valid Indonesian driving license (SIM) for e-moped
-            use.
+            I confirm I hold a valid Indonesian SIM or an international driving
+            permit where local law requires it for this e-moped.
           </span>
         </label>
       ) : null}
@@ -730,6 +834,7 @@ function ModelDetailInner() {
           <div>
             <div className="text-[11px]" style={{ color: "var(--text2)" }}>
               {tier.label}
+              {weekend.applied ? " · weekend +15%" : ""}
               {selectedAddons.length
                 ? ` · +${selectedAddons.length} add-on`
                 : ""}

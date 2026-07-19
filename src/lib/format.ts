@@ -220,8 +220,8 @@ export function relativeAge(
   };
 }
 
-/** Return allowed only within this radius of the hub (meters). */
-export const RETURN_GEOFENCE_M = 80;
+/** Return allowed only within this radius of the chosen return hub (meters). */
+export const RETURN_GEOFENCE_M = 200;
 
 export function distanceMeters(
   lat1: number,
@@ -245,6 +245,50 @@ export function isInsideReturnGeofence(
 export function formatMetersAway(meters: number): string {
   if (meters < 1000) return `${Math.round(meters)}m away`;
   return `${(meters / 1000).toFixed(1)}km away`;
+}
+
+/** Demo map pin ↔ lat/lng around a hub (for drag-to-geofence simulation). */
+export const DEMO_MAP_HUB_PIN = { topPct: 38, leftPct: 62 };
+/** ~8 m per percent → full map ≈ 800 m, so the 200 m zone is easy to hit by dragging. */
+const DEMO_MAP_METERS_PER_PCT = 8;
+
+export function demoPinPctToLatLng(
+  zoneLat: number,
+  zoneLng: number,
+  topPct: number,
+  leftPct: number,
+  hubTopPct = DEMO_MAP_HUB_PIN.topPct,
+  hubLeftPct = DEMO_MAP_HUB_PIN.leftPct,
+): { lat: number; lng: number } {
+  const dNorth = (hubTopPct - topPct) * DEMO_MAP_METERS_PER_PCT;
+  const dEast = (leftPct - hubLeftPct) * DEMO_MAP_METERS_PER_PCT;
+  const lat = zoneLat + dNorth / 111_320;
+  const lng =
+    zoneLng +
+    dEast / (111_320 * Math.cos((zoneLat * Math.PI) / 180));
+  return { lat, lng };
+}
+
+export function demoLatLngToPinPct(
+  zoneLat: number,
+  zoneLng: number,
+  lat: number,
+  lng: number,
+  hubTopPct = DEMO_MAP_HUB_PIN.topPct,
+  hubLeftPct = DEMO_MAP_HUB_PIN.leftPct,
+): { top: string; left: string } {
+  const dNorth = (lat - zoneLat) * 111_320;
+  const dEast =
+    (lng - zoneLng) * 111_320 * Math.cos((zoneLat * Math.PI) / 180);
+  const topPct = Math.min(
+    95,
+    Math.max(5, hubTopPct - dNorth / DEMO_MAP_METERS_PER_PCT),
+  );
+  const leftPct = Math.min(
+    95,
+    Math.max(5, hubLeftPct + dEast / DEMO_MAP_METERS_PER_PCT),
+  );
+  return { top: `${topPct}%`, left: `${leftPct}%` };
 }
 
 export function formatExtendLabel(minutes: number): string {
@@ -273,9 +317,46 @@ export function bookingCode(): string {
   return out;
 }
 
-/** Demo rider: student kost near Margonda / UI Depok corridor. */
+/** Demo rider default: student kost near Margonda / UI Depok corridor. */
 export const USER_LAT = -6.3705;
 export const USER_LNG = 106.8245;
+
+/** Honest discovery pin — city centers (not live tracking). Bali pin ≈ Canggu Berawa. */
+export type DiscoveryPinId = "jakarta" | "bali" | "near_me";
+
+export const DISCOVERY_PIN_COORDS: Record<
+  Exclude<DiscoveryPinId, "near_me">,
+  { lat: number; lng: number; label: string }
+> = {
+  jakarta: {
+    lat: USER_LAT,
+    lng: USER_LNG,
+    label: "Jakarta / Depok",
+  },
+  bali: {
+    lat: -8.6595,
+    lng: 115.1303,
+    label: "Bali · Canggu",
+  },
+};
+
+export function resolveDiscoveryCoords(
+  pin: DiscoveryPinId,
+  gps: { lat: number; lng: number } | null,
+): { lat: number; lng: number; label: string; approximate: boolean } {
+  if (pin === "near_me" && gps) {
+    return {
+      lat: gps.lat,
+      lng: gps.lng,
+      label: "Near you",
+      approximate: false,
+    };
+  }
+  if (pin === "bali") {
+    return { ...DISCOVERY_PIN_COORDS.bali, approximate: true };
+  }
+  return { ...DISCOVERY_PIN_COORDS.jakarta, approximate: true };
+}
 
 export function osmBrowseUrl(lat: number, lng: number, zoom = 16): string {
   return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=${zoom}/${lat}/${lng}`;
@@ -301,8 +382,14 @@ export function paymentMethodLabel(method: string): string {
       return "OVO";
     case "dana":
       return "DANA";
+    case "shopeepay":
+      return "ShopeePay";
+    case "casan_wallet":
+      return "Casan Wallet";
     case "pay_at_operator":
       return "Bayar di toko";
+    case "card":
+      return "Card";
     default:
       return method;
   }
@@ -325,6 +412,52 @@ export function siteOpenClose(site: {
     return { open: parts[0].trim(), close: parts[1].trim() };
   }
   return { open: site.hours, close: "—" };
+}
+
+function parseHhMm(value: string): number | null {
+  const m = value.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
+  return h * 60 + min;
+}
+
+/** Whether a hub is open at `at` based on opensAt/closesAt or hours text. */
+export function isSiteOpenNow(
+  site: { opensAt?: string; closesAt?: string; hours: string },
+  at: Date = new Date(),
+): boolean {
+  const { open, close } = siteOpenClose(site);
+  const openMin = parseHhMm(open);
+  const closeMin = parseHhMm(close);
+  if (openMin == null || closeMin == null) return true;
+  const nowMin = at.getHours() * 60 + at.getMinutes();
+  if (closeMin > openMin) return nowMin >= openMin && nowMin < closeMin;
+  // Overnight window (e.g. 22:00–06:00)
+  return nowMin >= openMin || nowMin < closeMin;
+}
+
+export const WEEKEND_SURCHARGE_PCT = 15;
+
+/** Apply operator weekend +15% when the appointment lands on Sat/Sun. */
+export function applyWeekendSurcharge(
+  priceIdr: number,
+  enabled: boolean,
+  appointmentAt: string | Date | null | undefined,
+): { priceIdr: number; applied: boolean } {
+  if (!enabled || appointmentAt == null) {
+    return { priceIdr, applied: false };
+  }
+  const d = new Date(appointmentAt);
+  if (Number.isNaN(d.getTime())) return { priceIdr, applied: false };
+  const day = d.getDay();
+  const weekend = day === 0 || day === 6;
+  if (!weekend) return { priceIdr, applied: false };
+  return {
+    priceIdr: Math.round(priceIdr * (1 + WEEKEND_SURCHARGE_PCT / 100)),
+    applied: true,
+  };
 }
 
 export function batteryWh(voltageV: number, ah: number): number {

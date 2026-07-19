@@ -17,6 +17,7 @@ import { canAccessSite, getCurrentStaff } from "@/lib/permissions";
 const riderItems = [
   { href: "/home", label: "Home", icon: Bike },
   { href: "/history", label: "Trips", icon: History },
+  { href: "/wallet", label: "Wallet", icon: Wallet },
   { href: "/profile", label: "Profile", icon: User },
 ];
 

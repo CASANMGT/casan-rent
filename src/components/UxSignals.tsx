@@ -289,6 +289,83 @@ export function HomeGuidance({ city }: { city: string }) {
   );
 }
 
+const deskSteps = [
+  {
+    title: "1 · Terima permintaan",
+    body: "Kartu kuning di Beranda = pelanggan menunggu. Cek janji ambil & stok, lalu tap Terima atau Tolak. WA jika perlu klarifikasi.",
+  },
+  {
+    title: "2 · Serahkan kunci",
+    body: "Setelah bayar, rider datang ke toko. Buka Pesanan → Serahkan kunci fisik (atau biarkan self-unlock untuk kunci aplikasi).",
+  },
+  {
+    title: "3 · Jaga armada",
+    body: "Di Sepeda: tandai Siap / Perawatan, catat log perawatan. Tidak ada Remote Lock / IoT — hubungi rider via WA bila perlu.",
+  },
+] as const;
+
+/** First-shift bottom sheet for newly hired desk staff. */
+export function OperatorDeskGuide() {
+  const done = useAppStore((s) => s.operatorDeskGuideComplete);
+  const complete = useAppStore((s) => s.completeOperatorDeskGuide);
+  const [step, setStep] = useState(0);
+  if (done) return null;
+  const current = deskSteps[step];
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[190] bg-black/40" />
+      <section
+        className="fixed bottom-0 left-1/2 z-[191] w-full max-w-[430px] -translate-x-1/2 rounded-t-3xl p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        style={{ background: "var(--card)" }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Panduan meja operator"
+      >
+        <div className="text-[10px] font-bold uppercase tracking-wide" style={{ color: "var(--text2)" }}>
+          Panduan shift pertama · First shift
+        </div>
+        <h2 className="font-display mt-1 text-xl font-semibold">{current.title}</h2>
+        <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--text2)" }}>
+          {current.body}
+        </p>
+        <div className="mt-4 flex items-center gap-2">
+          {deskSteps.map((_, i) => (
+            <span
+              key={i}
+              className="h-1.5 flex-1 rounded-full"
+              style={{
+                background: i <= step ? "var(--primary)" : "var(--border)",
+              }}
+            />
+          ))}
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            className="flex-1 rounded-xl py-3 text-sm font-bold"
+            style={{ background: "var(--bg-deep)", color: "var(--text2)" }}
+            onClick={complete}
+          >
+            Lewati
+          </button>
+          <button
+            type="button"
+            className="flex-[2] rounded-xl py-3 text-sm font-bold text-white"
+            style={{ background: "var(--primary)" }}
+            onClick={() => {
+              if (step >= deskSteps.length - 1) complete();
+              else setStep((s) => s + 1);
+            }}
+          >
+            {step >= deskSteps.length - 1 ? "Siap kerja" : "Lanjut"}
+          </button>
+        </div>
+      </section>
+    </>
+  );
+}
+
 export function WeatherStrip({ city }: { city: string }) {
   const bali = city.toLowerCase().includes("bali");
   return (
@@ -300,9 +377,16 @@ export function WeatherStrip({ city }: { city: string }) {
       <div className="min-w-0 flex-1">
         <div className="text-sm font-bold">
           {bali ? "29°C · Sunny" : "31°C · Partly cloudy"}
+          <span
+            className="ml-1.5 text-[10px] font-semibold"
+            style={{ color: "var(--text2)" }}
+          >
+            · Demo
+          </span>
         </div>
         <div className="text-[11px]" style={{ color: "var(--text2)" }}>
           {bali ? "78% humidity · 14 km/h wind" : "72% humidity · 9 km/h wind"}
+          {" · not live weather"}
         </div>
       </div>
       <div className="max-w-[8.5rem] text-right text-[10px] font-semibold" style={{ color: "var(--primary)" }}>

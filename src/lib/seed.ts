@@ -12,6 +12,8 @@ import type {
 } from "./types";
 
 export const DEPOSIT_IDR = 200_000;
+/** Demo starting balance: covers refundable deposit + a short typical rental. */
+export const WALLET_SEED_IDR = DEPOSIT_IDR + 150_000;
 
 /** Jakarta = primary; Bali retained as secondary. */
 export const operators: Operator[] = [
@@ -1331,7 +1333,15 @@ function mockPaid(
     | "createdAt"
     | "physicalKeyGiven"
     | "physicalKeyReturned"
-  > & { hoursAgo: number },
+    | "digitalKeyIssueMode"
+    | "digitalKeyIssuedAt"
+    | "returnSiteId"
+  > & {
+    hoursAgo: number;
+    digitalKeyIssueMode?: Booking["digitalKeyIssueMode"];
+    digitalKeyIssuedAt?: string | null;
+    returnSiteId?: string;
+  },
 ): Booking {
   const created = new Date(Date.now() - partial.hoursAgo * 3600_000).toISOString();
   const { hoursAgo: _, ...rest } = partial;
@@ -1353,6 +1363,13 @@ function mockPaid(
     physicalKeyGiven: needsPhys,
     physicalKeyReturned: needsPhys,
     riderPhone: rest.riderPhone ?? "+62 812-0000-0000",
+    returnSiteId: rest.returnSiteId ?? rest.siteId,
+    digitalKeyIssueMode: rest.digitalKeyIssueMode ?? "auto",
+    digitalKeyIssuedAt:
+      rest.digitalKeyIssuedAt ??
+      (rest.keysAccess === "digital" || rest.keysAccess === "both"
+        ? created
+        : null),
   };
 }
 
@@ -1493,6 +1510,9 @@ export const seedMockBookings: Booking[] = [
     keysAccess: "both",
     physicalKeyGiven: true,
     physicalKeyReturned: false,
+    digitalKeyIssueMode: "auto",
+    digitalKeyIssuedAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+    returnSiteId: "site-margonda-lobby",
     durationLabel: "2 Hours",
     durationMinutes: 120,
     rentalPriceIdr: 63_000,
@@ -1527,6 +1547,9 @@ export const seedMockBookings: Booking[] = [
     keysAccess: "both",
     physicalKeyGiven: false,
     physicalKeyReturned: false,
+    digitalKeyIssueMode: "auto",
+    digitalKeyIssuedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    returnSiteId: "site-margonda-lobby",
     durationLabel: "6 Hours",
     durationMinutes: 360,
     rentalPriceIdr: 330_000,
@@ -1543,6 +1566,80 @@ export const seedMockBookings: Booking[] = [
     extensions: [],
     motorOn: false,
     createdAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+    rating: null,
+    reviewNote: null,
+  },
+  {
+    id: "bk-mock-waiting",
+    code: "CR-WAIT01",
+    operatorId: "op-margonda",
+    vehicleId: "v-mg-e3",
+    modelId: "m-margo-galaxy",
+    siteId: "site-margonda-lobby",
+    riderName: "You (demo)",
+    riderPhone: "+62 812-0000-0000",
+    status: "pending",
+    pickupType: "front_desk",
+    rentalMode: "digital",
+    keysAccess: "both",
+    physicalKeyGiven: false,
+    physicalKeyReturned: false,
+    digitalKeyIssueMode: "auto",
+    digitalKeyIssuedAt: null,
+    returnSiteId: "site-margonda-lobby",
+    durationLabel: "3 Hours",
+    durationMinutes: 180,
+    rentalPriceIdr: 95_000,
+    addonsPriceIdr: 0,
+    addons: [],
+    depositIdr: DEPOSIT_IDR,
+    paymentMethod: "casan_wallet",
+    paymentStatus: "paid",
+    appointmentAt: new Date(Date.now() + 90 * 60_000).toISOString(),
+    readyAt: null,
+    startsAt: null,
+    endsAt: null,
+    completedAt: null,
+    extensions: [],
+    motorOn: false,
+    createdAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+    rating: null,
+    reviewNote: null,
+  },
+  {
+    id: "bk-mock-unpaid",
+    code: "CR-PAY01",
+    operatorId: "op-margonda",
+    vehicleId: "v-mg-e4",
+    modelId: "m-margo-galaxy",
+    siteId: "site-margonda-lobby",
+    riderName: "You (demo)",
+    riderPhone: "+62 812-0000-0000",
+    status: "pending",
+    pickupType: "self_service",
+    rentalMode: "digital",
+    keysAccess: "digital",
+    physicalKeyGiven: false,
+    physicalKeyReturned: false,
+    digitalKeyIssueMode: "auto",
+    digitalKeyIssuedAt: null,
+    returnSiteId: "site-margonda-lobby",
+    durationLabel: "1 Hour",
+    durationMinutes: 60,
+    rentalPriceIdr: 35_000,
+    addonsPriceIdr: 0,
+    addons: [],
+    depositIdr: DEPOSIT_IDR,
+    paymentMethod: "casan_wallet",
+    paymentStatus: "pending",
+    appointmentAt: new Date(Date.now() + 45 * 60_000).toISOString(),
+    readyAt: null,
+    startsAt: null,
+    endsAt: null,
+    completedAt: null,
+    extensions: [],
+    motorOn: false,
+    createdAt: new Date(Date.now() - 8 * 60_000).toISOString(),
     rating: null,
     reviewNote: null,
   },

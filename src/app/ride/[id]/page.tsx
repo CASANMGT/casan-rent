@@ -15,10 +15,14 @@ import {
   distanceMeters,
   formatMetersAway,
   isInsideReturnGeofence,
+  applyWeekendSurcharge,
   RETURN_GEOFENCE_M,
   USER_LAT,
   USER_LNG,
   osmBrowseUrl,
+  demoPinPctToLatLng,
+  demoLatLngToPinPct,
+  DEMO_MAP_HUB_PIN,
 } from "@/lib/format";
 import { CalendarClock, MapPin, Navigation } from "lucide-react";
 import { MockMap } from "@/components/MockMap";
@@ -30,13 +34,23 @@ import { IS_DEMO } from "@/lib/demo";
 import { GpsFreshness } from "@/components/UxSignals";
 
 /** Mirrors the store's extendRide pricing: pro-rata on the current rate. */
-function extendPriceFor(booking: Booking, extraMinutes: number): number {
+function extendPriceFor(
+  booking: Booking,
+  extraMinutes: number,
+  weekendOn: boolean,
+): number {
   const perMin =
     booking.rentalPriceIdr / Math.max(1, booking.durationMinutes);
-  return Math.round(perMin * extraMinutes);
+  const base = Math.round(perMin * extraMinutes);
+  const endsAt = booking.endsAt
+    ? new Date(new Date(booking.endsAt).getTime() + extraMinutes * 60_000)
+    : new Date();
+  return applyWeekendSurcharge(base, weekendOn, endsAt).priceIdr;
 }
 
 const extendPayMethods: { id: PaymentMethod; name: string }[] = [
+  { id: "casan_wallet", name: "Wallet" },
+  { id: "pay_at_operator", name: "Pay at hub" },
   { id: "qris", name: "QRIS" },
   { id: "dana", name: "DANA" },
   { id: "ovo", name: "OVO" },
@@ -65,19 +79,31 @@ function RideInner() {
   const extendRide = useAppStore((s) => s.extendRide);
   const markOverdue = useAppStore((s) => s.markOverdue);
   const submitReview = useAppStore((s) => s.submitReview);
+  const setReturnSite = useAppStore((s) => s.setReturnSite);
   const setToast = useAppStore((s) => s.setToast);
+  const walletBalanceIdr = useAppStore((s) => s.walletBalanceIdr);
+  const weekendSurcharge = useAppStore((s) => s.weekendSurcharge);
 
   const booking = bookings.find((b) => b.id === id);
   const vehicle = vehicles.find((v) => v.id === booking?.vehicleId);
   const op = operators.find((o) => o.id === booking?.operatorId);
   const site = sites.find((x) => x.id === booking?.siteId);
+  const returnSite =
+    sites.find((s) => s.id === (booking?.returnSiteId || booking?.siteId)) ??
+    site;
+  const returnHubs = booking
+    ? sites.filter((s) => s.operatorId === booking.operatorId)
+    : [];
+  const weekendOn = Boolean(
+    booking && weekendSurcharge[booking.operatorId],
+  );
 
   const [now, setNow] = useState(0);
   const [sos, setSos] = useState(false);
   const [returnStep, setReturnStep] = useState(0);
   const [extendOpen, setExtendOpen] = useState(false);
   const [extendMins, setExtendMins] = useState<number | null>(null);
-  const [extendMethod, setExtendMethod] = useState<PaymentMethod>("qris");
+  const [extendMethod, setExtendMethod] = useState<PaymentMethod>("casan_wallet");
   const [extendPaying, setExtendPaying] = useState(false);
   const [rating, setRating] = useState(5);
   const [reviewNote, setReviewNote] = useState("");
@@ -132,7 +158,9 @@ function RideInner() {
             Trip complete
           </div>
           <p className="mt-2 text-sm" style={{ color: "var(--text2)" }}>
-            Deposit refund initiated (mock).
+            {booking.paymentMethod === "casan_wallet"
+              ? "Deposit returned to Casan Wallet."
+              : "Deposit refund initiated (mock)."}
           </p>
         </div>
         <div className="card">
@@ -196,14 +224,27 @@ function RideInner() {
   }
 
   if (returnStep > 0) {
-    const zoneLat = site?.lat ?? op.lat;
-    const zoneLng = site?.lng ?? op.lng;
-    const zoneName = site?.name ?? op.name;
+    const zoneLat = returnSite?.lat ?? site?.lat ?? op.lat;
+    const zoneLng = returnSite?.lng ?? site?.lng ?? op.lng;
+    const zoneName = returnSite?.name ?? site?.name ?? op.name;
+    const selectedReturnId =
+      booking.returnSiteId || booking.siteId || returnSite?.id;
     const pos = riderPos ?? { lat: USER_LAT, lng: USER_LNG };
     const metersAway = distanceMeters(pos.lat, pos.lng, zoneLat, zoneLng);
     const inZone = isInsideReturnGeofence(pos.lat, pos.lng, zoneLat, zoneLng);
     const needsPhysicalReturn =
       booking.keysAccess === "physical" || booking.keysAccess === "both";
+    const hubPins = returnHubs.map((hub, i) => {
+      const n = Math.max(1, returnHubs.length);
+      const top = `${28 + (i % 3) * 18}%`;
+      const left = `${22 + ((i * 5) % n) * (50 / n) + (i % 2) * 8}%`;
+      return {
+        id: hub.id,
+        label: hub.name,
+        top,
+        left,
+      };
+    });
 
     function refreshGps() {
       setLocating(true);
@@ -255,8 +296,8 @@ function RideInner() {
                       : "Not at the return zone yet"}
                   </div>
                   <p className="mt-1" style={{ color: "var(--text2)" }}>
-                    Return only at <strong>{zoneName}</strong> (within{" "}
-                    {RETURN_GEOFENCE_M}m).{" "}
+                    Return within {RETURN_GEOFENCE_M}m of chosen hub{" "}
+                    <strong>{zoneName}</strong>.{" "}
                     {inZone
                       ? "You can finish the return now."
                       : `You are ${formatMetersAway(metersAway)} — ride closer to unlock return.`}
@@ -265,25 +306,106 @@ function RideInner() {
               </div>
             </div>
 
+            {returnHubs.length > 0 ? (
+              <div className="mx-4 mt-3">
+                <div className="mb-2 text-sm font-bold">Return hub</div>
+                <div className="grid gap-2">
+                  {returnHubs.map((hub) => {
+                    const selected = selectedReturnId === hub.id;
+                    return (
+                      <button
+                        key={hub.id}
+                        type="button"
+                        className="rounded-xl border-2 px-3 py-2.5 text-left text-sm font-bold"
+                        style={{
+                          borderColor: selected
+                            ? "var(--primary)"
+                            : "var(--border)",
+                          background: selected
+                            ? "color-mix(in srgb, var(--primary) 8%, white)"
+                            : "var(--card)",
+                          color: selected ? "var(--primary)" : "var(--text)",
+                        }}
+                        onClick={() => setReturnSite(booking.id, hub.id)}
+                      >
+                        {hub.name}
+                        {hub.area ? (
+                          <span
+                            className="mt-0.5 block text-[11px] font-semibold"
+                            style={{ color: "var(--text2)" }}
+                          >
+                            {hub.area}
+                            {hub.city ? ` · ${hub.city}` : ""}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
             <div className="mx-4 mt-3">
               <MockMap
-                height={160}
+                height={200}
                 mapImage={op.mapImage}
-                label={`Approximate return zone · ${RETURN_GEOFENCE_M}m`}
+                label={
+                  IS_DEMO
+                    ? `Drag blue pin · ${RETURN_GEOFENCE_M}m zone`
+                    : `Approximate return zone · ${RETURN_GEOFENCE_M}m`
+                }
                 directionsHref={osmBrowseUrl(zoneLat, zoneLng)}
-                userPin={{
-                  top: inZone ? "42%" : "68%",
-                  left: inZone ? "55%" : "32%",
-                }}
-                pins={[
-                  {
-                    id: "return",
-                    label: zoneName,
-                    top: "38%",
-                    left: "62%",
-                  },
-                ]}
+                userPin={demoLatLngToPinPct(
+                  zoneLat,
+                  zoneLng,
+                  pos.lat,
+                  pos.lng,
+                )}
+                onUserPinDrag={
+                  IS_DEMO
+                    ? ({ topPct, leftPct }) => {
+                        const next = demoPinPctToLatLng(
+                          zoneLat,
+                          zoneLng,
+                          topPct,
+                          leftPct,
+                        );
+                        setRiderPos(next);
+                        setGpsUpdatedAt(now);
+                        setGeoError(null);
+                      }
+                    : undefined
+                }
+                pins={
+                  hubPins.length > 0
+                    ? hubPins.map((p) =>
+                        p.id === selectedReturnId || p.id === "return"
+                          ? {
+                              ...p,
+                              top: `${DEMO_MAP_HUB_PIN.topPct}%`,
+                              left: `${DEMO_MAP_HUB_PIN.leftPct}%`,
+                            }
+                          : p,
+                      )
+                    : [
+                        {
+                          id: "return",
+                          label: zoneName,
+                          top: `${DEMO_MAP_HUB_PIN.topPct}%`,
+                          left: `${DEMO_MAP_HUB_PIN.leftPct}%`,
+                        },
+                      ]
+                }
               />
+              {IS_DEMO ? (
+                <p
+                  className="mt-2 text-center text-[11px]"
+                  style={{ color: "var(--text2)" }}
+                >
+                  Drag the blue pin onto the hub marker to enter the parking
+                  geofence.
+                </p>
+              ) : null}
             </div>
 
             <div
@@ -295,7 +417,7 @@ function RideInner() {
                 <div className="mt-0.5 text-[10px]" style={{ color: "var(--text2)" }}>
                   <GpsFreshness
                     updatedAt={gpsUpdatedAt}
-                    label="Your location"
+                    label="Your phone location (demo)"
                     mock={!gpsUpdatedAt}
                   />
                 </div>
@@ -395,7 +517,8 @@ function RideInner() {
                 className="-mt-2 px-6 pb-2 text-center text-xs font-semibold"
                 style={{ color: "var(--warn)" }}
               >
-                Geofence: return opens only within {RETURN_GEOFENCE_M}m of the hub
+                Geofence: return opens only within {RETURN_GEOFENCE_M}m of chosen
+                hub
               </p>
             ) : null}
           </>
@@ -540,7 +663,7 @@ function RideInner() {
           }}
         >
           Overdue{overdueBy ? ` by ${overdueBy}` : ""} — return now or extend.
-          Motor locked (mock).
+          Motor locked (mock). Overtime billing coming soon.
         </div>
       ) : null}
       {warn ? (
@@ -564,7 +687,8 @@ function RideInner() {
             color: "var(--danger)",
           }}
         >
-          Under 5 minutes left — overtime may apply.
+          Under 5 minutes left — return now or extend. Overtime billing coming
+          soon.
         </div>
       ) : null}
 
@@ -639,11 +763,20 @@ function RideInner() {
           label="Battery"
         />
         <Stat
+          value={
+            vehicle.rangeKm != null ? `~${vehicle.rangeKm} km` : "—"
+          }
+          label="Est. range"
+        />
+        <Stat
           value={keysAccessLabel(booking.keysAccess ?? booking.rentalMode)}
           label="Keys"
         />
-        <Stat value={site?.name ?? op.name} label="Hub" />
       </div>
+      <p className="mx-4 -mt-1 mb-2 text-center text-[10px]" style={{ color: "var(--text2)" }}>
+        Distance ridden omitted — no live trip GPS trail yet. Est. range is from
+        the bike model, not a trip odometer.
+      </p>
       <div className="-mt-1 mb-3 px-4 text-center text-[10px]" style={{ color: "var(--text2)" }}>
         <GpsFreshness label="Bike GPS" mock />
       </div>
@@ -690,6 +823,106 @@ function RideInner() {
           and support only.
         </div>
       )}
+
+      {(booking.rentalMode === "digital" ||
+        booking.keysAccess === "both") &&
+      vehicle.vehicleType !== "bicycle" ? (
+        <>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={locating}
+            onClick={() => {
+              setLocating(true);
+              setGeoError(null);
+              if (!navigator.geolocation) {
+                setGeoError("GPS not available on this device");
+                setLocating(false);
+                setToast("GPS not available");
+                return;
+              }
+              navigator.geolocation.getCurrentPosition(
+                (p) => {
+                  const lat = p.coords.latitude;
+                  const lng = p.coords.longitude;
+                  setRiderPos({ lat, lng });
+                  setGpsUpdatedAt(now);
+                  setLocating(false);
+                  setToast(
+                    `Location · ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+                  );
+                },
+                () => {
+                  setGeoError("Could not read GPS. Allow location access.");
+                  setLocating(false);
+                  setToast("Could not read GPS");
+                },
+                { enableHighAccuracy: true, timeout: 10_000 },
+              );
+            }}
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              <Navigation size={16} />
+              {locating ? "Pinging…" : "Ping location"}
+            </span>
+          </button>
+          {geoError ? (
+            <p
+              className="-mt-2 px-6 text-center text-xs"
+              style={{ color: "var(--warn)" }}
+            >
+              {geoError}
+            </p>
+          ) : null}
+          <div
+            className="-mt-1 mb-3 px-4 text-center text-[10px]"
+            style={{ color: "var(--text2)" }}
+          >
+            <GpsFreshness
+              updatedAt={gpsUpdatedAt}
+              label="Your phone location (demo)"
+              mock={!gpsUpdatedAt}
+            />
+          </div>
+        </>
+      ) : null}
+
+      <div
+        className="mx-4 mb-3 rounded-2xl border px-4 py-3"
+        style={{ borderColor: "var(--border)", background: "var(--card)" }}
+      >
+        <div className="flex items-start gap-3">
+          <MapPin
+            size={18}
+            className="mt-0.5 shrink-0"
+            style={{ color: "var(--primary)" }}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "var(--text2)" }}>
+              Return here
+            </div>
+            <div className="text-sm font-bold">
+              {returnSite?.name ?? site?.name ?? op.name}
+            </div>
+            <p className="mt-0.5 text-xs" style={{ color: "var(--text2)" }}>
+              Within {RETURN_GEOFENCE_M}m · phone GPS
+            </p>
+            <button
+              type="button"
+              className="mt-2 text-xs font-bold"
+              style={{ color: "var(--primary)" }}
+              onClick={() => {
+                if (!riderPos) {
+                  setRiderPos({ lat: USER_LAT, lng: USER_LNG });
+                }
+                setReturnStep(1);
+              }}
+            >
+              Start return →
+            </button>
+          </div>
+        </div>
+      </div>
 
       <button
         type="button"
@@ -778,7 +1011,7 @@ function RideInner() {
                         className="mt-0.5 text-[11px] font-semibold"
                         style={{ color: "var(--text2)" }}
                       >
-                        {formatIdr(extendPriceFor(booking, mins))}
+                        {formatIdr(extendPriceFor(booking, mins, weekendOn))}
                       </div>
                     </button>
                   ))}
@@ -823,11 +1056,11 @@ function RideInner() {
                     className="text-base font-bold"
                     style={{ color: "var(--primary)" }}
                   >
-                    {formatIdr(extendPriceFor(booking, extendMins))}
+                    {formatIdr(extendPriceFor(booking, extendMins, weekendOn))}
                   </div>
                 </div>
                 <p className="section-label !px-0">Payment method</p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {extendPayMethods.map((m) => (
                     <button
                       key={m.id}
@@ -845,7 +1078,9 @@ function RideInner() {
                       }}
                       onClick={() => setExtendMethod(m.id)}
                     >
-                      {m.name}
+                      {m.id === "casan_wallet"
+                        ? `Wallet (${formatIdr(walletBalanceIdr)})`
+                        : m.name}
                     </button>
                   ))}
                 </div>
@@ -855,15 +1090,38 @@ function RideInner() {
                   disabled={extendPaying}
                   style={{ opacity: extendPaying ? 0.6 : 1 }}
                   onClick={async () => {
+                    const amountIdr = extendPriceFor(
+                      booking,
+                      extendMins,
+                      weekendOn,
+                    );
+                    if (
+                      extendMethod === "casan_wallet" &&
+                      walletBalanceIdr < amountIdr
+                    ) {
+                      setToast(
+                        "Top up Casan Wallet or choose Pay at hub / QRIS",
+                      );
+                      return;
+                    }
                     setExtendPaying(true);
                     try {
+                      if (
+                        extendMethod === "casan_wallet" ||
+                        extendMethod === "pay_at_operator"
+                      ) {
+                        extendRide(booking.id, extendMins, extendMethod);
+                        setExtendOpen(false);
+                        setExtendMins(null);
+                        return;
+                      }
                       const response = await fetch("/api/payment", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                           bookingId: booking.id,
                           method: extendMethod,
-                          amountIdr: extendPriceFor(booking, extendMins),
+                          amountIdr,
                           purpose: "extension",
                         }),
                       });
@@ -875,7 +1133,7 @@ function RideInner() {
                       }
                       extendRide(booking.id, extendMins);
                       setToast(
-                        `Paid ${formatIdr(extendPriceFor(booking, extendMins))} · extended ${formatExtendLabel(extendMins)}`,
+                        `Paid ${formatIdr(amountIdr)} · extended ${formatExtendLabel(extendMins)}`,
                       );
                       setExtendOpen(false);
                       setExtendMins(null);
@@ -892,7 +1150,9 @@ function RideInner() {
                 >
                   {extendPaying
                     ? "Processing payment…"
-                    : `Pay ${formatIdr(extendPriceFor(booking, extendMins))}`}
+                    : extendMethod === "pay_at_operator"
+                      ? `Confirm · pay ${formatIdr(extendPriceFor(booking, extendMins, weekendOn))} at hub`
+                      : `Pay ${formatIdr(extendPriceFor(booking, extendMins, weekendOn))}`}
                 </button>
                 <button
                   type="button"

@@ -25,7 +25,20 @@ export type PaymentMethod =
   | "gopay"
   | "shopeepay"
   | "card"
-  | "pay_at_operator";
+  | "pay_at_operator"
+  | "casan_wallet";
+
+export type WalletTxnKind = "topup" | "rental" | "referral" | "refund";
+
+export interface WalletTxn {
+  id: string;
+  kind: WalletTxnKind;
+  /** Positive = credit, negative = debit. */
+  amountIdr: number;
+  label: string;
+  createdAt: string;
+  bookingId?: string;
+}
 export type StaffRole =
   | "admin"
   | "booking_manager"
@@ -220,6 +233,12 @@ export interface Booking {
   rentalMode: "digital" | "key_handover";
   /** App key, physical shop key, or both (shop pickup + app). */
   keysAccess: KeysAccess;
+  /** How digital unlock is granted: on confirm vs desk tap. */
+  digitalKeyIssueMode: "auto" | "manual";
+  /** When staff/system issued the digital key (null = not yet). */
+  digitalKeyIssuedAt: string | null;
+  /** Hub the rider chose to return to (defaults to pickup site). */
+  returnSiteId: string;
   /** Operator gave physical key to rider (shop handover). */
   physicalKeyGiven: boolean;
   /** Operator collected physical key on return. */
@@ -275,4 +294,14 @@ export interface AppNotification {
   /** Deep link when rider taps the notification. */
   href?: string;
   bookingId?: string;
+}
+
+/** Desk maintenance note for a fleet unit (not IoT / remote commands). */
+export interface VehicleMaintenanceEntry {
+  id: string;
+  vehicleId: string;
+  operatorId: string;
+  note: string;
+  createdAt: string;
+  createdBy: string;
 }

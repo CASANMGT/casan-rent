@@ -5,6 +5,7 @@ import {
   Bike,
   Banknote,
   Bell,
+  CircleHelp,
   LogOut,
   Tag,
   Users,
@@ -82,6 +83,12 @@ function ProfileInner() {
         icon={Banknote}
         label="Laporan uang"
         hint="Earnings report"
+      />
+      <OpMenuLink
+        href="/operator/help"
+        icon={CircleHelp}
+        label="Bantuan shift"
+        hint="Shift help"
       />
 
       <button

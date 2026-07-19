@@ -88,7 +88,7 @@ function PricingInner() {
         <div>
           <div className="text-sm font-semibold">Tambah +15% Sabtu–Minggu</div>
           <div className="text-xs" style={{ color: "var(--text2)" }}>
-            Harga naik otomatis di akhir pekan
+            Applied on rider booking when pickup is Saturday or Sunday
           </div>
         </div>
         <button

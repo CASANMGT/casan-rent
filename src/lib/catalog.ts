@@ -284,6 +284,39 @@ export function operatorRatingStats(
   return { avg, count, reviews };
 }
 
+/** Desk trust cue for pending requests — completed trips + avg rating for this rider. */
+export function riderTrustStats(
+  bookings: Booking[],
+  rider: { riderName: string; riderPhone?: string },
+): {
+  completedTrips: number;
+  avgRating: number | null;
+  label: string;
+} {
+  const phone = rider.riderPhone?.replace(/\D/g, "") ?? "";
+  const name = rider.riderName.trim().toLowerCase();
+  const completed = bookings.filter((b) => {
+    if (b.status !== "completed") return false;
+    if (phone && b.riderPhone?.replace(/\D/g, "") === phone) return true;
+    return b.riderName.trim().toLowerCase() === name;
+  });
+  const rated = completed.filter((b) => b.rating != null);
+  const avgRating =
+    rated.length === 0
+      ? null
+      : Math.round(
+          (rated.reduce((s, b) => s + (b.rating ?? 0), 0) / rated.length) * 10,
+        ) / 10;
+  const completedTrips = completed.length;
+  let label = "New rider";
+  if (completedTrips >= 5 && (avgRating == null || avgRating >= 4)) {
+    label = "Trusted";
+  } else if (completedTrips >= 1) {
+    label = "Returning";
+  }
+  return { completedTrips, avgRating, label };
+}
+
 export function waLink(phone: string, text: string): string {
   const digits = phone.replace(/\D/g, "");
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;

@@ -14,6 +14,7 @@ import {
   seedMockBookings,
   chargingAddons as seedChargingAddons,
   DEPOSIT_IDR,
+  WALLET_SEED_IDR,
 } from "./seed";
 import type {
   AppNotification,
@@ -30,12 +31,21 @@ import type {
   PricingTier,
   StaffMember,
   Vehicle,
+  VehicleMaintenanceEntry,
   VehicleModel,
   VehicleStatus,
   VehicleType,
   RentalMode,
+  WalletTxn,
 } from "./types";
-import { bookingCode, formatIdr, formatReturnBy, siteOpenClose } from "./format";
+import {
+  bookingCode,
+  formatIdr,
+  formatReturnBy,
+  siteOpenClose,
+  applyWeekendSurcharge,
+  type DiscoveryPinId,
+} from "./format";
 import { IS_DEMO } from "./demo";
 import { APP_VERSION } from "./version";
 import { pickAssignableUnit } from "./catalog";
@@ -103,6 +113,14 @@ interface AppState {
   bookings: Booking[];
   favorites: string[];
   notifications: AppNotification[];
+  maintenanceLog: VehicleMaintenanceEntry[];
+  /** Demo Casan Wallet balance (IDR). */
+  walletBalanceIdr: number;
+  walletTxns: WalletTxn[];
+  referralRedeemed: boolean;
+  /** Hub sort origin — city pin or optional GPS (honest, not fake tracking). */
+  discoveryPin: DiscoveryPinId;
+  discoveryGps: { lat: number; lng: number } | null;
   toast: string | null;
   darkMode: boolean;
   weekendSurcharge: Record<string, boolean>;
@@ -110,6 +128,8 @@ interface AppState {
   welcomeComplete: boolean;
   safetyTipsDismissed: boolean;
   riderGuide: "welcome" | "safety" | null;
+  /** First-shift desk guide for operators. */
+  operatorDeskGuideComplete: boolean;
   /** Operator console: null = all lokasi. */
   operatorActiveSiteId: string | null;
   setHydrated: (v: boolean) => void;
@@ -119,6 +139,11 @@ interface AppState {
   completeWelcome: () => void;
   dismissSafetyTips: () => void;
   showRiderGuide: (guide: "welcome" | "safety" | null) => void;
+  completeOperatorDeskGuide: () => void;
+  setDiscoveryPin: (pin: DiscoveryPinId) => void;
+  setDiscoveryGps: (coords: { lat: number; lng: number } | null) => void;
+  topUpWallet: (amountIdr: number) => void;
+  redeemReferralCode: (code: string) => string | null;
   setOperatorActiveSiteId: (siteId: string | null) => void;
   updateStaffSiteIds: (
     staffId: string,
@@ -138,6 +163,9 @@ interface AppState {
     modelId?: string;
     siteId?: string;
     pickupType: PickupType;
+    /** Rider key choice when the model allows both. */
+    keysAccess?: KeysAccess;
+    digitalKeyIssueMode?: "auto" | "manual";
     durationLabel: string;
     durationMinutes: number;
     rentalPriceIdr: number;
@@ -146,6 +174,12 @@ interface AppState {
     appointmentAt?: string;
   }) => Booking | null;
   setPaymentMethod: (bookingId: string, method: PaymentMethod) => void;
+  setReturnSite: (bookingId: string, siteId: string) => void;
+  setDigitalKeyIssueMode: (
+    bookingId: string,
+    mode: "auto" | "manual",
+  ) => void;
+  issueDigitalKey: (bookingId: string) => void;
   confirmBooking: (bookingId: string) => void;
   declineBooking: (bookingId: string) => void;
   /** Rider cancels an unpaid booking; releases assigned unit. */
@@ -158,11 +192,16 @@ interface AppState {
   /** Operator collects physical key on return. */
   collectPhysicalKey: (bookingId: string) => void;
   toggleMotor: (bookingId: string) => void;
-  extendRide: (bookingId: string, extraMinutes: number) => void;
+  extendRide: (
+    bookingId: string,
+    extraMinutes: number,
+    paymentMethod?: PaymentMethod,
+  ) => void;
   markOverdue: (bookingId: string) => void;
   completeReturn: (bookingId: string) => void;
   submitReview: (bookingId: string, rating: number, note?: string) => void;
   updateVehicleStatus: (vehicleId: string, status: VehicleStatus) => void;
+  addMaintenanceEntry: (vehicleId: string, note: string) => string | null;
   addSite: (input: {
     operatorId: string;
     name: string;
@@ -257,6 +296,36 @@ function notifyConfirm(booking: Booking): AppNotification {
   };
 }
 
+function notifyDigitalKey(booking: Booking): AppNotification {
+  return {
+    id: `n-dkey-${booking.id}-${Date.now()}`,
+    title: "Digital key ready",
+    body: `${booking.code} — open Unlock at the hub to start your ride.`,
+    read: false,
+    createdAt: new Date().toISOString(),
+    bookingId: booking.id,
+    href: `/book/${booking.id}/confirmed`,
+  };
+}
+
+function needsDigitalKey(b: Pick<Booking, "keysAccess">): boolean {
+  return b.keysAccess === "digital" || b.keysAccess === "both";
+}
+
+/** Auto-issue digital key on confirm when mode is auto. */
+function applyAutoDigitalKey(
+  b: Booking,
+  issuedAt: string,
+): { booking: Booking; issued: boolean } {
+  if (!needsDigitalKey(b)) return { booking: b, issued: false };
+  if (b.digitalKeyIssueMode === "manual") return { booking: b, issued: false };
+  if (b.digitalKeyIssuedAt) return { booking: b, issued: false };
+  return {
+    booking: { ...b, digitalKeyIssuedAt: issuedAt },
+    issued: true,
+  };
+}
+
 function nextStatusAfterConfirm(b: Booking): Booking["status"] {
   return b.paymentStatus === "paid" ? "awaiting_pickup" : "confirmed";
 }
@@ -277,12 +346,27 @@ export const useAppStore = create<AppState>()(
       bookings: seedMockBookings,
       favorites: ["m-margo-galaxy", "op-margonda"],
       notifications: seedNotifications,
+      maintenanceLog: [],
+      walletBalanceIdr: WALLET_SEED_IDR,
+      walletTxns: [
+        {
+          id: "wtxn-seed",
+          kind: "topup",
+          amountIdr: WALLET_SEED_IDR,
+          label: "Demo starting balance",
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      referralRedeemed: false,
+      discoveryPin: "jakarta",
+      discoveryGps: null,
       toast: null,
       darkMode: false,
       lastSeenVersion: null,
       welcomeComplete: false,
       safetyTipsDismissed: false,
       riderGuide: null,
+      operatorDeskGuideComplete: false,
       operatorActiveSiteId: null,
       weekendSurcharge: {
         "op-margonda": true,
@@ -306,6 +390,53 @@ export const useAppStore = create<AppState>()(
           safetyTipsDismissed:
             guide === "safety" ? false : s.safetyTipsDismissed,
         })),
+      completeOperatorDeskGuide: () =>
+        set({ operatorDeskGuideComplete: true }),
+      setDiscoveryPin: (pin) => set({ discoveryPin: pin }),
+      setDiscoveryGps: (coords) => set({ discoveryGps: coords }),
+      topUpWallet: (amountIdr) => {
+        const amount = Math.round(amountIdr);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          set({ toast: "Enter a valid top-up amount" });
+          return;
+        }
+        const txn: WalletTxn = {
+          id: `wtxn-${Date.now()}`,
+          kind: "topup",
+          amountIdr: amount,
+          label: "Top-up (demo)",
+          createdAt: new Date().toISOString(),
+        };
+        set((s) => ({
+          walletBalanceIdr: s.walletBalanceIdr + amount,
+          walletTxns: [txn, ...s.walletTxns],
+          toast: `Added ${formatIdr(amount)} to Casan Wallet`,
+        }));
+      },
+      redeemReferralCode: (code) => {
+        const normalized = code.trim().toUpperCase();
+        if (normalized !== "CASAN25") {
+          return "Unknown code — try CASAN25";
+        }
+        if (get().referralRedeemed) {
+          return "You already redeemed CASAN25 on this demo";
+        }
+        const credit = 25_000;
+        const txn: WalletTxn = {
+          id: `wtxn-ref-${Date.now()}`,
+          kind: "referral",
+          amountIdr: credit,
+          label: "Referral CASAN25 (demo credit)",
+          createdAt: new Date().toISOString(),
+        };
+        set((s) => ({
+          referralRedeemed: true,
+          walletBalanceIdr: s.walletBalanceIdr + credit,
+          walletTxns: [txn, ...s.walletTxns],
+          toast: `${formatIdr(credit)} added to Casan Wallet`,
+        }));
+        return null;
+      },
       setOperatorActiveSiteId: (siteId) =>
         set((s) => {
           const member = getCurrentStaff(s.user, s.staff);
@@ -440,19 +571,35 @@ export const useAppStore = create<AppState>()(
 
         if (!vehicle || vehicle.status !== "available" || !modelId) return null;
 
-        const keysAccess: KeysAccess =
+        const vehicleKeys: KeysAccess =
           vehicle.rentalMode === "both"
             ? "both"
             : vehicle.rentalMode === "key_handover"
               ? "physical"
               : "digital";
 
+        // Rider may narrow "both" to digital or physical; otherwise use vehicle mode.
+        let keysAccess: KeysAccess = vehicleKeys;
+        if (vehicleKeys === "both" && input.keysAccess) {
+          if (
+            input.keysAccess === "digital" ||
+            input.keysAccess === "physical" ||
+            input.keysAccess === "both"
+          ) {
+            keysAccess = input.keysAccess;
+          }
+        } else if (vehicleKeys !== "both") {
+          keysAccess = vehicleKeys;
+        }
+
         // Physical or dual-key bikes always need shop key handover.
         const needsShopKey =
           keysAccess === "physical" || keysAccess === "both";
         const pickupType: PickupType = needsShopKey
           ? "front_desk"
-          : input.pickupType;
+          : input.pickupType === "front_desk"
+            ? "front_desk"
+            : "self_service";
 
         const needsConfirm =
           needsShopKey || pickupType === "front_desk";
@@ -460,6 +607,11 @@ export const useAppStore = create<AppState>()(
         // App motor control when digital or both; physical-only otherwise.
         const rentalMode =
           keysAccess === "physical" ? "key_handover" : "digital";
+
+        const digitalKeyIssueMode =
+          needsDigitalKey({ keysAccess })
+            ? (input.digitalKeyIssueMode ?? "auto")
+            : "manual";
 
         const catalog = get().chargingAddons;
         const selectedAddons: BookingAddon[] = (input.addonIds ?? [])
@@ -488,12 +640,20 @@ export const useAppStore = create<AppState>()(
           vehicleId: vehicle.id,
           modelId,
           siteId: vehicle.siteId,
+          returnSiteId: vehicle.siteId,
           riderName: user.name || "Guest",
           riderPhone: user.phone || undefined,
           status: needsConfirm ? "pending" : "confirmed",
           pickupType,
           rentalMode,
           keysAccess,
+          digitalKeyIssueMode,
+          digitalKeyIssuedAt:
+            !needsConfirm &&
+            needsDigitalKey({ keysAccess }) &&
+            digitalKeyIssueMode === "auto"
+              ? new Date().toISOString()
+              : null,
           physicalKeyGiven: false,
           physicalKeyReturned: false,
           durationLabel: input.durationLabel,
@@ -534,6 +694,74 @@ export const useAppStore = create<AppState>()(
           ),
         })),
 
+      setReturnSite: (bookingId, siteId) =>
+        set((s) => {
+          const booking = s.bookings.find((b) => b.id === bookingId);
+          if (!booking) return s;
+          const site = s.sites.find(
+            (x) => x.id === siteId && x.operatorId === booking.operatorId,
+          );
+          if (!site) {
+            return { ...s, toast: "Pick a return hub from this operator" };
+          }
+          return {
+            bookings: s.bookings.map((b) =>
+              b.id === bookingId ? { ...b, returnSiteId: siteId } : b,
+            ),
+          };
+        }),
+
+      setDigitalKeyIssueMode: (bookingId, mode) =>
+        set((s) => {
+          const booking = s.bookings.find((b) => b.id === bookingId);
+          if (!booking) return s;
+          if (!operatorCan(s, "bookings.manage", booking.siteId)) {
+            return { ...s, toast: operatorDeniedToast(s) };
+          }
+          if (!needsDigitalKey(booking)) return s;
+          return {
+            bookings: s.bookings.map((b) =>
+              b.id === bookingId ? { ...b, digitalKeyIssueMode: mode } : b,
+            ),
+            toast:
+              mode === "auto"
+                ? "Kunci digital: otomatis saat Terima"
+                : "Kunci digital: kirim manual dari Orders",
+          };
+        }),
+
+      issueDigitalKey: (bookingId) => {
+        const state = get();
+        const booking = state.bookings.find((b) => b.id === bookingId);
+        if (!booking) return;
+        if (!operatorCan(state, "bookings.manage", booking.siteId)) {
+          set({ toast: operatorDeniedToast(state) });
+          return;
+        }
+        if (!needsDigitalKey(booking)) {
+          set({ toast: "Pesanan ini tidak memakai kunci digital" });
+          return;
+        }
+        if (booking.digitalKeyIssuedAt) {
+          set({ toast: "Kunci digital sudah dikirim" });
+          return;
+        }
+        if (
+          !["confirmed", "awaiting_pickup", "pending"].includes(booking.status)
+        ) {
+          set({ toast: "Tidak bisa kirim kunci untuk status ini" });
+          return;
+        }
+        const issuedAt = new Date().toISOString();
+        set((s) => ({
+          bookings: s.bookings.map((b) =>
+            b.id === bookingId ? { ...b, digitalKeyIssuedAt: issuedAt } : b,
+          ),
+          notifications: [notifyDigitalKey(booking), ...s.notifications],
+          toast: `Kunci digital dikirim · ${booking.code}`,
+        }));
+      },
+
       confirmBooking: (bookingId) =>
         set((s) => {
           const booking = s.bookings.find((b) => b.id === bookingId);
@@ -541,22 +769,29 @@ export const useAppStore = create<AppState>()(
           if (!operatorCan(s, "bookings.manage", booking.siteId)) {
             return { ...s, toast: operatorDeniedToast(s) };
           }
+          const issuedAt = new Date().toISOString();
+          const { booking: next, issued } = applyAutoDigitalKey(
+            {
+              ...booking,
+              status: nextStatusAfterConfirm(booking),
+              readyAt:
+                booking.paymentStatus === "paid" ||
+                booking.paymentMethod === "pay_at_operator"
+                  ? issuedAt
+                  : booking.readyAt,
+            },
+            issuedAt,
+          );
+          const notes = [notifyConfirm(booking)];
+          if (issued) notes.push(notifyDigitalKey(next));
           return {
             bookings: s.bookings.map((b) =>
-              b.id === bookingId
-                ? {
-                    ...b,
-                    status: nextStatusAfterConfirm(b),
-                    readyAt:
-                      b.paymentStatus === "paid" ||
-                      b.paymentMethod === "pay_at_operator"
-                        ? new Date().toISOString()
-                        : b.readyAt,
-                  }
-                : b,
+              b.id === bookingId ? next : b,
             ),
-            notifications: [notifyConfirm(booking), ...s.notifications],
-            toast: "Booking confirmed — rider notified",
+            notifications: [...notes, ...s.notifications],
+            toast: issued
+              ? "Diterima · kunci digital dikirim ke rider"
+              : "Pesanan diterima — rider diberitahu",
           };
         }),
 
@@ -600,8 +835,19 @@ export const useAppStore = create<AppState>()(
       cancelBooking: (bookingId) =>
         set((s) => {
           const booking = s.bookings.find((b) => b.id === bookingId);
-          if (!booking || booking.paymentStatus === "paid") return s;
-          if (["active", "overdue", "completed", "cancelled"].includes(booking.status)) {
+          if (!booking) return s;
+          if (
+            ["active", "overdue", "completed", "cancelled"].includes(
+              booking.status,
+            )
+          ) {
+            return s;
+          }
+          // Unpaid: always cancellable. Paid: only while still waiting hub confirm.
+          if (
+            booking.paymentStatus === "paid" &&
+            booking.status !== "pending"
+          ) {
             return s;
           }
           return {
@@ -638,25 +884,30 @@ export const useAppStore = create<AppState>()(
               operatorCan(s, "bookings.manage", b.siteId),
           );
           const confirmedIds = new Set(confirmed.map((booking) => booking.id));
-          const notes = confirmed.map(notifyConfirm);
+          const issuedAt = new Date().toISOString();
+          const notes: AppNotification[] = [];
+          const updated = s.bookings.map((b) => {
+            if (!confirmedIds.has(b.id)) return b;
+            const base: Booking = {
+              ...b,
+              status: nextStatusAfterConfirm(b),
+              readyAt:
+                b.paymentStatus === "paid" ||
+                b.paymentMethod === "pay_at_operator"
+                  ? issuedAt
+                  : b.readyAt,
+            };
+            const { booking: next, issued } = applyAutoDigitalKey(base, issuedAt);
+            notes.push(notifyConfirm(b));
+            if (issued) notes.push(notifyDigitalKey(next));
+            return next;
+          });
           return {
-            bookings: s.bookings.map((b) =>
-              confirmedIds.has(b.id)
-                ? {
-                    ...b,
-                    status: nextStatusAfterConfirm(b),
-                    readyAt:
-                      b.paymentStatus === "paid" ||
-                      b.paymentMethod === "pay_at_operator"
-                        ? new Date().toISOString()
-                        : b.readyAt,
-                  }
-                : b,
-            ),
+            bookings: updated,
             notifications: [...notes, ...s.notifications],
             toast:
               confirmed.length > 0
-                ? `Confirmed ${confirmed.length} — riders notified`
+                ? `Diterima ${confirmed.length} — rider diberitahu`
                 : null,
           };
         }),
@@ -664,29 +915,74 @@ export const useAppStore = create<AppState>()(
       payBooking: (bookingId) => {
         const before = get();
         const booking = before.bookings.find((b) => b.id === bookingId);
+        if (!booking) return;
         if (
-          booking &&
+          before.user.role === "operator" &&
           !operatorCan(before, "bookings.manage", booking.siteId)
         ) {
           set({ toast: operatorDeniedToast(before) });
           return;
         }
-        set((s) => ({
-          bookings: s.bookings.map((b) =>
-            b.id === bookingId
-              ? {
-                  ...b,
-                  paymentStatus: "paid",
-                  status:
-                    b.status === "pending" ? "pending" : "awaiting_pickup",
-                  readyAt:
-                    b.status === "pending"
-                      ? b.readyAt
-                      : (b.readyAt ?? new Date().toISOString()),
-                }
-              : b,
-          ),
-        }));
+
+        if (
+          booking.paymentMethod === "casan_wallet" &&
+          booking.paymentStatus === "pending"
+        ) {
+          const total =
+            booking.rentalPriceIdr +
+            (booking.addonsPriceIdr ?? 0) +
+            booking.depositIdr;
+          if (before.walletBalanceIdr < total) {
+            set({
+              toast: `Casan Wallet needs ${formatIdr(total)} — top up or choose another method`,
+            });
+            return;
+          }
+          const txn: WalletTxn = {
+            id: `wtxn-pay-${bookingId}-${Date.now()}`,
+            kind: "rental",
+            amountIdr: -total,
+            label: `Rental ${booking.code}`,
+            createdAt: new Date().toISOString(),
+            bookingId,
+          };
+          set((s) => ({
+            walletBalanceIdr: s.walletBalanceIdr - total,
+            walletTxns: [txn, ...s.walletTxns],
+            bookings: s.bookings.map((b) =>
+              b.id === bookingId
+                ? {
+                    ...b,
+                    paymentStatus: "paid" as const,
+                    status:
+                      b.status === "pending" ? "pending" : "awaiting_pickup",
+                    readyAt:
+                      b.status === "pending"
+                        ? b.readyAt
+                        : (b.readyAt ?? new Date().toISOString()),
+                  }
+                : b,
+            ),
+          }));
+        } else {
+          set((s) => ({
+            bookings: s.bookings.map((b) =>
+              b.id === bookingId
+                ? {
+                    ...b,
+                    paymentStatus: "paid" as const,
+                    status:
+                      b.status === "pending" ? "pending" : "awaiting_pickup",
+                    readyAt:
+                      b.status === "pending"
+                        ? b.readyAt
+                        : (b.readyAt ?? new Date().toISOString()),
+                  }
+                : b,
+            ),
+          }));
+        }
+
         // Demo: simulate operator accepting the request after a short delay.
         const after = get().bookings.find((b) => b.id === bookingId);
         if (IS_DEMO && after?.status === "pending") {
@@ -809,7 +1105,7 @@ export const useAppStore = create<AppState>()(
           ),
         })),
 
-      extendRide: (bookingId, extraMinutes) =>
+      extendRide: (bookingId, extraMinutes, paymentMethod) =>
         set((s) => {
           const booking = s.bookings.find((b) => b.id === bookingId);
           if (!booking?.endsAt) return s;
@@ -819,7 +1115,22 @@ export const useAppStore = create<AppState>()(
           );
           const perMin =
             booking.rentalPriceIdr / Math.max(1, booking.durationMinutes);
-          const extraPrice = Math.round(perMin * extraMinutes);
+          const baseExtra = Math.round(perMin * extraMinutes);
+          const weekend = applyWeekendSurcharge(
+            baseExtra,
+            Boolean(s.weekendSurcharge[booking.operatorId]),
+            endsAt,
+          );
+          const extraPrice = weekend.priceIdr;
+          if (
+            paymentMethod === "casan_wallet" &&
+            s.walletBalanceIdr < extraPrice
+          ) {
+            return {
+              ...s,
+              toast: `Casan Wallet needs ${formatIdr(extraPrice)} — top up or choose another method`,
+            };
+          }
           const addLabel =
             extraMinutes < 60
               ? `+${extraMinutes}m`
@@ -828,7 +1139,25 @@ export const useAppStore = create<AppState>()(
                 : extraMinutes % (60 * 24) === 0
                   ? `+${extraMinutes / (60 * 24)}d`
                   : `+${extraMinutes / 60}h`;
+          const weekendNote = weekend.applied ? " (+15% weekend)" : "";
+          const walletTxn: WalletTxn | null =
+            paymentMethod === "casan_wallet"
+              ? {
+                  id: `wtxn-ext-${bookingId}-${Date.now()}`,
+                  kind: "rental",
+                  amountIdr: -extraPrice,
+                  label: `Extend ${booking.code} ${addLabel}${weekendNote}`,
+                  createdAt: new Date().toISOString(),
+                  bookingId,
+                }
+              : null;
           return {
+            walletBalanceIdr: walletTxn
+              ? s.walletBalanceIdr - extraPrice
+              : s.walletBalanceIdr,
+            walletTxns: walletTxn
+              ? [walletTxn, ...s.walletTxns]
+              : s.walletTxns,
             bookings: s.bookings.map((b) =>
               b.id === bookingId
                 ? {
@@ -852,12 +1181,15 @@ export const useAppStore = create<AppState>()(
                   }
                 : b,
             ),
-            toast: `Extended ${addLabel}`,
+            toast:
+              paymentMethod === "pay_at_operator"
+                ? `Extended ${addLabel}${weekendNote} · pay ${formatIdr(extraPrice)} at the hub`
+                : `Extended ${addLabel}${weekendNote}`,
             notifications: [
               {
                 id: `n-extension-${bookingId}-${Date.now()}`,
                 title: "Rental extended",
-                body: `${booking.code} paid ${formatIdr(extraPrice)} for ${addLabel}. New return: ${formatReturnBy(endsAt.toISOString())}.`,
+                body: `${booking.code} paid ${formatIdr(extraPrice)}${weekendNote} for ${addLabel}. New return: ${formatReturnBy(endsAt.toISOString())}.`,
                 read: false,
                 createdAt: new Date().toISOString(),
               },
@@ -880,7 +1212,7 @@ export const useAppStore = create<AppState>()(
               {
                 id: `n-overdue-${bookingId}-${Date.now()}`,
                 title: "Rental overdue",
-                body: `${booking.code} time expired. Return now or extend to avoid overtime.`,
+                body: `${booking.code} time expired. Return now or extend. Overtime billing coming soon.`,
                 read: false,
                 createdAt: new Date().toISOString(),
               },
@@ -893,14 +1225,34 @@ export const useAppStore = create<AppState>()(
         const state = get();
         const booking = state.bookings.find((b) => b.id === bookingId);
         if (!booking) return;
+        if (booking.status === "completed") return;
         if (!operatorCan(state, "bookings.manage", booking.siteId)) {
           set({ toast: operatorDeniedToast(state) });
           return;
         }
         const needsPhys =
           booking.keysAccess === "physical" || booking.keysAccess === "both";
+        const refundToWallet =
+          booking.paymentMethod === "casan_wallet" &&
+          booking.paymentStatus === "paid" &&
+          booking.depositIdr > 0;
+        const deposit = booking.depositIdr;
+        const refundTxn: WalletTxn | null = refundToWallet
+          ? {
+              id: `wtxn-refund-${bookingId}-${Date.now()}`,
+              kind: "refund",
+              amountIdr: deposit,
+              label: `Deposit returned · ${booking.code}`,
+              createdAt: new Date().toISOString(),
+              bookingId,
+            }
+          : null;
         // Operator finish = key must be back. Auto-mark collected when finishing.
         set((s) => ({
+          walletBalanceIdr: refundTxn
+            ? s.walletBalanceIdr + deposit
+            : s.walletBalanceIdr,
+          walletTxns: refundTxn ? [refundTxn, ...s.walletTxns] : s.walletTxns,
           bookings: s.bookings.map((b) =>
             b.id === bookingId
               ? {
@@ -920,9 +1272,13 @@ export const useAppStore = create<AppState>()(
               ? { ...v, status: "available" as VehicleStatus }
               : v,
           ),
-          toast: needsPhys
-            ? "Key collected · bike free again"
-            : "Return finished · bike free",
+          toast: refundToWallet
+            ? needsPhys
+              ? `Key collected · ${formatIdr(deposit)} deposit back to Wallet`
+              : `Return finished · ${formatIdr(deposit)} deposit back to Wallet`
+            : needsPhys
+              ? "Key collected · bike free again"
+              : "Return finished · bike free",
         }));
       },
 
@@ -981,6 +1337,29 @@ export const useAppStore = create<AppState>()(
             vehicles: syncVehicleStatusesFromBookings(vehicles, s.bookings),
           };
         }),
+
+      addMaintenanceEntry: (vehicleId, note) => {
+        const state = get();
+        const vehicle = state.vehicles.find((v) => v.id === vehicleId);
+        if (!vehicle) return "Unit not found";
+        if (!operatorCan(state, "fleet.manage", vehicle.siteId)) {
+          return operatorDeniedToast(state);
+        }
+        const trimmed = note.trim();
+        if (!trimmed) return "Add a short maintenance note";
+        const entry: VehicleMaintenanceEntry = {
+          id: `mnt-${Date.now()}`,
+          vehicleId,
+          operatorId: vehicle.operatorId,
+          note: trimmed.slice(0, 240),
+          createdAt: new Date().toISOString(),
+          createdBy: state.user.name || "Staff",
+        };
+        set((s) => ({
+          maintenanceLog: [entry, ...s.maintenanceLog],
+        }));
+        return null;
+      },
 
       addSite: (input) => {
         const state = get();
@@ -1382,6 +1761,9 @@ export const useAppStore = create<AppState>()(
           pickupType: needsShop ? "front_desk" : "self_service",
           rentalMode: keysAccess === "physical" ? "key_handover" : "digital",
           keysAccess,
+          digitalKeyIssueMode: "auto",
+          digitalKeyIssuedAt: null,
+          returnSiteId: vehicle.siteId,
           physicalKeyGiven: false,
           physicalKeyReturned: false,
           durationLabel: "2 Hours",
@@ -1438,11 +1820,26 @@ export const useAppStore = create<AppState>()(
           pricing: seedPricing,
           favorites: ["m-margo-galaxy", "op-margonda"],
           notifications: seedNotifications,
+          maintenanceLog: [],
+          walletBalanceIdr: WALLET_SEED_IDR,
+          walletTxns: [
+            {
+              id: "wtxn-seed",
+              kind: "topup",
+              amountIdr: WALLET_SEED_IDR,
+              label: "Demo starting balance",
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          referralRedeemed: false,
+          discoveryPin: "jakarta",
+          discoveryGps: null,
           reviews: seedReviews,
           chargingAddons: seedChargingAddons,
           welcomeComplete: false,
           safetyTipsDismissed: false,
           riderGuide: null,
+          operatorDeskGuideComplete: false,
         }),
     }),
     {
@@ -1484,7 +1881,14 @@ export const useAppStore = create<AppState>()(
                     addons: b.addons ?? [],
                     addonsPriceIdr: b.addonsPriceIdr ?? 0,
                     siteId: b.siteId || vehicle?.siteId || "",
+                    returnSiteId: b.returnSiteId || b.siteId || vehicle?.siteId || "",
                     keysAccess,
+                    digitalKeyIssueMode: b.digitalKeyIssueMode ?? "auto",
+                    digitalKeyIssuedAt:
+                      b.digitalKeyIssuedAt ??
+                      (keysAccess === "digital" || keysAccess === "both"
+                        ? b.createdAt
+                        : null),
                     physicalKeyGiven: b.physicalKeyGiven ?? false,
                     physicalKeyReturned: b.physicalKeyReturned ?? false,
                   };
@@ -1501,7 +1905,15 @@ export const useAppStore = create<AppState>()(
                       addons: b.addons ?? [],
                       addonsPriceIdr: b.addonsPriceIdr ?? 0,
                       siteId: b.siteId || vehicle?.siteId || "",
+                      returnSiteId:
+                        b.returnSiteId || b.siteId || vehicle?.siteId || "",
                       keysAccess,
+                      digitalKeyIssueMode: b.digitalKeyIssueMode ?? "auto",
+                      digitalKeyIssuedAt:
+                        b.digitalKeyIssuedAt ??
+                        (keysAccess === "digital" || keysAccess === "both"
+                          ? b.createdAt
+                          : null),
                       physicalKeyGiven: b.physicalKeyGiven ?? false,
                       physicalKeyReturned: b.physicalKeyReturned ?? false,
                     };
@@ -1588,7 +2000,9 @@ export const useAppStore = create<AppState>()(
             );
             if (
               (demo.status === "active" ||
-                demo.status === "awaiting_pickup") &&
+                demo.status === "awaiting_pickup" ||
+                demo.status === "pending") &&
+              demo.riderName === "You (demo)" &&
               !state.bookings.some((b) => b.id === demo.id) &&
               state.vehicles.some((v) => v.id === demo.vehicleId) &&
               vehicleFree
@@ -1618,6 +2032,49 @@ export const useAppStore = create<AppState>()(
             state.vehicles,
             state.bookings,
           );
+          state.maintenanceLog = state.maintenanceLog ?? [];
+          state.walletBalanceIdr = state.walletBalanceIdr ?? WALLET_SEED_IDR;
+          state.walletTxns = state.walletTxns ?? [];
+          // Bump legacy demo seed (150k < deposit) so wallet pay still works.
+          if (
+            state.walletBalanceIdr === 150_000 &&
+            state.walletTxns.length === 1 &&
+            state.walletTxns[0]?.id === "wtxn-seed"
+          ) {
+            state.walletBalanceIdr = WALLET_SEED_IDR;
+            state.walletTxns = [
+              {
+                id: "wtxn-seed",
+                kind: "topup",
+                amountIdr: WALLET_SEED_IDR,
+                label: "Demo starting balance",
+                createdAt: state.walletTxns[0].createdAt,
+              },
+            ];
+          }
+          state.referralRedeemed = state.referralRedeemed ?? false;
+          state.discoveryPin = state.discoveryPin ?? "jakarta";
+          state.discoveryGps = state.discoveryGps ?? null;
+          // Backfill digital-key / multi-hub return fields on persisted bookings.
+          state.bookings = (state.bookings ?? []).map((b) => {
+            const keysAccess: KeysAccess =
+              b.keysAccess ??
+              (b.rentalMode === "key_handover" ? "physical" : "digital");
+            return {
+              ...b,
+              keysAccess,
+              returnSiteId: b.returnSiteId || b.siteId,
+              digitalKeyIssueMode: b.digitalKeyIssueMode ?? "auto",
+              digitalKeyIssuedAt:
+                b.digitalKeyIssuedAt !== undefined
+                  ? b.digitalKeyIssuedAt
+                  : keysAccess === "digital" || keysAccess === "both"
+                    ? b.createdAt
+                    : null,
+            };
+          });
+          state.operatorDeskGuideComplete =
+            state.operatorDeskGuideComplete ?? false;
           state.setHydrated(true);
         }
       },
@@ -1631,6 +2088,12 @@ export const useAppStore = create<AppState>()(
         bookings: s.bookings,
         favorites: s.favorites,
         notifications: s.notifications,
+        maintenanceLog: s.maintenanceLog,
+        walletBalanceIdr: s.walletBalanceIdr,
+        walletTxns: s.walletTxns,
+        referralRedeemed: s.referralRedeemed,
+        discoveryPin: s.discoveryPin,
+        discoveryGps: s.discoveryGps,
         reviews: s.reviews,
         chargingAddons: s.chargingAddons,
         darkMode: s.darkMode,
@@ -1639,6 +2102,7 @@ export const useAppStore = create<AppState>()(
         lastSeenVersion: s.lastSeenVersion,
         welcomeComplete: s.welcomeComplete,
         safetyTipsDismissed: s.safetyTipsDismissed,
+        operatorDeskGuideComplete: s.operatorDeskGuideComplete,
         operatorActiveSiteId: s.operatorActiveSiteId,
       }),
     },

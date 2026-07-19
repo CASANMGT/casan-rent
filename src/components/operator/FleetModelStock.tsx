@@ -12,6 +12,7 @@ import {
 import type {
   OperatorSite,
   Vehicle,
+  VehicleMaintenanceEntry,
   VehicleModel,
   VehicleStatus,
 } from "@/lib/types";
@@ -155,6 +156,8 @@ export function ModelStockList({
   onMove,
   moveSites,
   readOnly = false,
+  maintenanceLog = [],
+  onAddMaintenance,
 }: {
   models: VehicleModel[];
   units: Vehicle[];
@@ -163,8 +166,12 @@ export function ModelStockList({
   onMove: (vehicleId: string, siteId: string) => void;
   moveSites: OperatorSite[];
   readOnly?: boolean;
+  maintenanceLog?: VehicleMaintenanceEntry[];
+  onAddMaintenance?: (vehicleId: string, note: string) => void;
 }) {
   const [openModelId, setOpenModelId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
+  const [logOpen, setLogOpen] = useState<Record<string, boolean>>({});
 
   const groups = useMemo(() => {
     const byModel = new Map<string, Vehicle[]>();
@@ -436,6 +443,99 @@ export function ModelStockList({
                           </select>
                         </div>
                         ) : null}
+
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            className="text-[11px] font-bold"
+                            style={{ color: "var(--primary)" }}
+                            onClick={() =>
+                              setLogOpen((prev) => ({
+                                ...prev,
+                                [v.id]: !prev[v.id],
+                              }))
+                            }
+                          >
+                            {logOpen[v.id]
+                              ? "Sembunyikan log perawatan"
+                              : `Log perawatan (${
+                                  maintenanceLog.filter((e) => e.vehicleId === v.id)
+                                    .length
+                                })`}
+                          </button>
+                          {logOpen[v.id] ? (
+                            <div
+                              className="mt-2 rounded-lg px-2.5 py-2"
+                              style={{ background: "var(--bg-deep)" }}
+                            >
+                              {maintenanceLog
+                                .filter((e) => e.vehicleId === v.id)
+                                .slice(0, 5)
+                                .map((e) => (
+                                  <div
+                                    key={e.id}
+                                    className="border-b py-1.5 text-[11px] last:border-0"
+                                    style={{ borderColor: "var(--border)" }}
+                                  >
+                                    <div className="font-semibold">{e.note}</div>
+                                    <div style={{ color: "var(--text2)" }}>
+                                      {e.createdBy} ·{" "}
+                                      {new Date(e.createdAt).toLocaleString("id-ID", {
+                                        day: "numeric",
+                                        month: "short",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
+                              {maintenanceLog.filter((e) => e.vehicleId === v.id)
+                                .length === 0 ? (
+                                <div
+                                  className="py-1 text-[11px]"
+                                  style={{ color: "var(--text2)" }}
+                                >
+                                  Belum ada catatan — bukan perintah IoT.
+                                </div>
+                              ) : null}
+                              {!readOnly && onAddMaintenance ? (
+                                <div className="mt-2 flex gap-1.5">
+                                  <input
+                                    className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[11px] outline-none"
+                                    style={{
+                                      borderColor: "var(--border)",
+                                      background: "var(--card)",
+                                    }}
+                                    placeholder="Catatan singkat (ban, rem, cas…)"
+                                    value={noteDraft[v.id] ?? ""}
+                                    onChange={(e) =>
+                                      setNoteDraft((prev) => ({
+                                        ...prev,
+                                        [v.id]: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                  <button
+                                    type="button"
+                                    className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-white"
+                                    style={{ background: "var(--primary)" }}
+                                    onClick={() => {
+                                      const note = (noteDraft[v.id] ?? "").trim();
+                                      if (!note) return;
+                                      onAddMaintenance(v.id, note);
+                                      setNoteDraft((prev) => ({
+                                        ...prev,
+                                        [v.id]: "",
+                                      }));
+                                    }}
+                                  >
+                                    Simpan
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     );
                   })}

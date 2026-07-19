@@ -55,7 +55,9 @@ function StaffInner() {
           />
           <p className="mt-2 text-sm font-semibold">Belum ada staf</p>
           <p className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
-            Undang staf supaya bisa terima pesanan dan serahkan kunci.
+            Akun staf baru dibuat oleh admin sistem — undangan mandiri belum
+            tersedia. Untuk shift pertama, ikuti panduan di Beranda: Terima →
+            Serahkan kunci → Armada.
           </p>
         </div>
       ) : (

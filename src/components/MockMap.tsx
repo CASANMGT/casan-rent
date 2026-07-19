@@ -1,5 +1,7 @@
 "use client";
 
+import { useCallback, useRef } from "react";
+
 /** OpenStreetMap static screenshot background with overlay pins (no Google). */
 export function MockMap({
   pins = [],
@@ -8,6 +10,8 @@ export function MockMap({
   label = "Approximate map · demo",
   mapImage,
   directionsHref,
+  /** When set with userPin, rider can drag the blue pin (demo geofence). */
+  onUserPinDrag,
 }: {
   pins?: { id: string; label: string; top: string; left: string; href?: string }[];
   userPin?: { top: string; left: string };
@@ -17,9 +21,54 @@ export function MockMap({
   mapImage?: string;
   /** Real navigation — prefer this over trusting pin positions. */
   directionsHref?: string;
+  onUserPinDrag?: (pos: { topPct: number; leftPct: number }) => void;
 }) {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  const moveToClient = useCallback(
+    (clientX: number, clientY: number) => {
+      const el = mapRef.current;
+      if (!el || !onUserPinDrag) return;
+      const rect = el.getBoundingClientRect();
+      const leftPct = Math.min(
+        95,
+        Math.max(5, ((clientX - rect.left) / rect.width) * 100),
+      );
+      const topPct = Math.min(
+        95,
+        Math.max(5, ((clientY - rect.top) / rect.height) * 100),
+      );
+      onUserPinDrag({ topPct, leftPct });
+    },
+    [onUserPinDrag],
+  );
+
+  function onPointerDown(e: React.PointerEvent) {
+    if (!onUserPinDrag) return;
+    dragging.current = true;
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    moveToClient(e.clientX, e.clientY);
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragging.current || !onUserPinDrag) return;
+    moveToClient(e.clientX, e.clientY);
+  }
+
+  function onPointerUp(e: React.PointerEvent) {
+    if (!dragging.current) return;
+    dragging.current = false;
+    try {
+      (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div
+      ref={mapRef}
       className="relative overflow-hidden rounded-2xl"
       style={{
         height,
@@ -27,6 +76,7 @@ export function MockMap({
         backgroundImage: mapImage ? `url(${mapImage})` : undefined,
         backgroundSize: "cover",
         backgroundPosition: "center",
+        touchAction: onUserPinDrag ? "none" : undefined,
       }}
     >
       {!mapImage ? (
@@ -86,18 +136,33 @@ export function MockMap({
 
       {userPin ? (
         <div
-          className="absolute z-10 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white"
+          role={onUserPinDrag ? "slider" : undefined}
+          aria-label={
+            onUserPinDrag ? "Drag to move your demo location on the map" : undefined
+          }
+          className={`absolute z-20 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white ${
+            onUserPinDrag ? "cursor-grab active:cursor-grabbing" : ""
+          }`}
           style={{
             top: userPin.top,
             left: userPin.left,
             background: "var(--digital)",
             boxShadow: "0 0 0 4px rgba(40,116,166,0.25)",
+            touchAction: "none",
           }}
-          title="You (approximate)"
+          title={
+            onUserPinDrag
+              ? "Drag to simulate parking near the hub"
+              : "You (approximate)"
+          }
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
         />
       ) : null}
 
-      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
+      <div className="pointer-events-none absolute bottom-2 left-2 right-2 z-30 flex items-center justify-between gap-2">
         <div
           className="rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold"
           style={{ color: "var(--text2)" }}
@@ -109,7 +174,7 @@ export function MockMap({
             href={directionsHref}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full px-2.5 py-1 text-[10px] font-bold text-white"
+            className="pointer-events-auto rounded-full px-2.5 py-1 text-[10px] font-bold text-white"
             style={{ background: "var(--primary)" }}
           >
             Directions (OSM)

@@ -38,7 +38,8 @@ import {
   canStaff,
   getCurrentStaff,
 } from "@/lib/permissions";
-import { PendingAge } from "@/components/UxSignals";
+import { OperatorDeskGuide, PendingAge } from "@/components/UxSignals";
+import { riderTrustStats } from "@/lib/catalog";
 
 export default function OperatorDashboardPage() {
   return (
@@ -175,6 +176,7 @@ function DashboardInner() {
 
   return (
     <div className="content-pad pb-4">
+      <OperatorDeskGuide />
       <header
         className="px-5 py-4 text-white"
         style={{
@@ -389,6 +391,12 @@ function DashboardInner() {
         pending.slice(0, 3).map((b) => {
           const v = vehicles.find((x) => x.id === b.vehicleId);
           const site = sites.find((s) => s.id === b.siteId);
+          const trust = riderTrustStats(bookings, b);
+          const availableAtSite = vehicles.filter(
+            (x) =>
+              x.siteId === b.siteId &&
+              x.status === "available",
+          ).length;
           return (
             <div
               key={b.id}
@@ -405,7 +413,32 @@ function DashboardInner() {
                 </span>
                 <PendingAge createdAt={b.createdAt} />
               </div>
-              <div className="mt-1 text-lg font-bold">{b.riderName}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <div className="text-lg font-bold">{b.riderName}</div>
+                <span
+                  className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                  style={{
+                    background:
+                      trust.label === "Trusted"
+                        ? "var(--success-soft)"
+                        : trust.label === "Returning"
+                          ? "var(--info-soft)"
+                          : "var(--neutral-soft)",
+                    color:
+                      trust.label === "Trusted"
+                        ? "var(--ok)"
+                        : trust.label === "Returning"
+                          ? "var(--digital)"
+                          : "var(--neutral)",
+                  }}
+                >
+                  {trust.label}
+                  {trust.completedTrips > 0
+                    ? ` · ${trust.completedTrips} trip`
+                    : ""}
+                  {trust.avgRating != null ? ` · ★${trust.avgRating}` : ""}
+                </span>
+              </div>
               {b.riderPhone ? (
                 <a
                   className="text-sm font-semibold"
@@ -417,32 +450,51 @@ function DashboardInner() {
                   WA {b.riderPhone}
                 </a>
               ) : null}
-              <div className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
-                {v?.name ?? "sepeda"} · {v?.code} · {b.durationLabel}
-                <br />
-                {formatIdr(b.rentalPriceIdr + (b.addonsPriceIdr ?? 0))} ·{" "}
-                {b.paymentStatus === "paid" ? "Sudah bayar" : "Belum bayar"}
-                {b.appointmentAt ? (
-                  <>
-                    <br />
-                    <Clock size={12} className="mr-1 inline" />
-                    Janji{" "}
-                    {new Date(b.appointmentAt).toLocaleString("id-ID", {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </>
-                ) : null}
+              <div
+                className="mt-2 grid grid-cols-2 gap-2 rounded-xl px-3 py-2.5 text-xs"
+                style={{ background: "rgba(255,255,255,0.55)" }}
+              >
+                <div>
+                  <div style={{ color: "var(--text2)" }}>Janji ambil</div>
+                  <div className="font-bold">
+                    {b.appointmentAt
+                      ? new Date(b.appointmentAt).toLocaleString("id-ID", {
+                          weekday: "short",
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "Belum ditentukan"}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "var(--text2)" }}>Stok siap di lokasi</div>
+                  <div className="font-bold" style={{ color: "var(--ok)" }}>
+                    {availableAtSite} unit
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <div style={{ color: "var(--text2)" }}>Unit & bayar</div>
+                  <div className="font-bold">
+                    {v?.name ?? "sepeda"} · {v?.code} · {b.durationLabel} ·{" "}
+                    {formatIdr(b.rentalPriceIdr + (b.addonsPriceIdr ?? 0))} ·{" "}
+                    {b.paymentStatus === "paid" ? "Lunas" : "Belum bayar"}
+                  </div>
+                </div>
                 {site ? (
-                  <>
-                    <br />
+                  <div className="col-span-2">
                     <CityBadge city={site.city} /> {site.name}
-                  </>
+                  </div>
                 ) : null}
               </div>
+              <Link
+                href="/operator/bookings"
+                className="mt-2 inline-block text-xs font-bold"
+                style={{ color: "var(--primary)" }}
+              >
+                Detail lengkap di Pesanan →
+              </Link>
               {canManageBookings ? (
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button

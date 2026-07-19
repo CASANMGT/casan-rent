@@ -21,10 +21,10 @@ import {
   formatIdrShort,
   haversineKm,
   osmBrowseUrl,
+  isSiteOpenNow,
   siteOpenClose,
   vehicleTypeLabel,
-  USER_LAT,
-  USER_LNG,
+  resolveDiscoveryCoords,
 } from "@/lib/format";
 import {
   listModelsForOperator,
@@ -64,7 +64,11 @@ function OperatorDetailInner() {
   const sites = useAppStore((s) => s.sites);
   const bookings = useAppStore((s) => s.bookings);
   const reviews = useAppStore((s) => s.reviews);
+  const discoveryPin = useAppStore((s) => s.discoveryPin);
+  const discoveryGps = useAppStore((s) => s.discoveryGps);
   const op = operators.find((o) => o.id === id);
+
+  const pin = resolveDiscoveryCoords(discoveryPin, discoveryGps);
 
   const [page, setPage] = useState(0);
   const [sort, setSort] = useState<"newest" | "highest" | "lowest">("newest");
@@ -143,7 +147,7 @@ function OperatorDetailInner() {
   const distLat = activeSite?.lat ?? op.lat;
   const distLng = activeSite?.lng ?? op.lng;
   const dist = formatDistance(
-    haversineKm(USER_LAT, USER_LNG, distLat, distLng),
+    haversineKm(pin.lat, pin.lng, distLat, distLng),
   );
   const availableUnits = vehicles.filter(
     (v) =>
@@ -152,6 +156,7 @@ function OperatorDetailInner() {
       (!activeSiteId || v.siteId === activeSiteId),
   ).length;
   const oc = siteOpenClose(activeSite ?? { hours: op.hours });
+  const openNow = isSiteOpenNow(activeSite ?? { hours: op.hours });
 
   const totalReviews = sortedReviews.length;
   const totalPages = Math.max(1, Math.ceil(totalReviews / PAGE_SIZE));
@@ -200,7 +205,7 @@ function OperatorDetailInner() {
       <div className="mx-4 mt-3 grid grid-cols-3 gap-2">
         <InfoChip
           icon={Clock}
-          label="Hours"
+          label={openNow ? "Open now" : "Closed"}
           value={`${oc.open}–${oc.close}`}
         />
         <InfoChip icon={MapPin} label="Distance" value={dist} />
@@ -210,6 +215,14 @@ function OperatorDetailInner() {
           value={rating.count ? String(rating.avg) : "New"}
         />
       </div>
+      <p
+        className="mx-4 mt-2 text-center text-xs font-semibold"
+        style={{ color: openNow ? "var(--ok)" : "var(--text-warn)" }}
+      >
+        {openNow
+          ? "● Hub open now — book and collect during hours"
+          : "● Hub closed now — Book later for open hours"}
+      </p>
 
       <div className="card !py-3">
         <div className="text-sm" style={{ color: "var(--text2)" }}>
@@ -364,31 +377,39 @@ function OperatorDetailInner() {
                 }}
               >
                 <div className="flex gap-3">
-                  <Link
-                    href={soldOut ? "#" : bookHref(model.id, false)}
-                    className="shrink-0"
-                    aria-disabled={soldOut}
-                    onClick={(e) => {
-                      if (soldOut) e.preventDefault();
-                    }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={model.images[0]}
-                      alt={model.name}
-                      className="h-[88px] w-[96px] rounded-xl object-cover"
-                    />
-                  </Link>
-                  <div className="min-w-0 flex-1">
+                  {soldOut ? (
+                    <div className="shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={model.images[0]}
+                        alt={model.name}
+                        className="h-[88px] w-[96px] rounded-xl object-cover"
+                      />
+                    </div>
+                  ) : (
                     <Link
-                      href={soldOut ? "#" : bookHref(model.id, false)}
-                      className="font-bold text-sm"
-                      onClick={(e) => {
-                        if (soldOut) e.preventDefault();
-                      }}
+                      href={bookHref(model.id, false)}
+                      className="shrink-0"
                     >
-                      {model.name}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={model.images[0]}
+                        alt={model.name}
+                        className="h-[88px] w-[96px] rounded-xl object-cover"
+                      />
                     </Link>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    {soldOut ? (
+                      <div className="font-bold text-sm">{model.name}</div>
+                    ) : (
+                      <Link
+                        href={bookHref(model.id, false)}
+                        className="font-bold text-sm"
+                      >
+                        {model.name}
+                      </Link>
+                    )}
                     <div className="text-xs" style={{ color: "var(--text2)" }}>
                       {vehicleTypeLabel(model.vehicleType)} ·{" "}
                       {modelBatteryLabel(model)}

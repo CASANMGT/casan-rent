@@ -24,8 +24,8 @@ function tripHref(status: string, paymentStatus: string, id: string) {
     return `/ride/${id}`;
   }
   if (status === "cancelled") return `/history`;
-  // Unpaid booking → resume checkout, not the confirmed screen.
   if (paymentStatus === "pending") return `/book/${id}`;
+  if (status === "pending") return `/book/${id}/confirmed`;
   return `/book/${id}/confirmed`;
 }
 
@@ -38,7 +38,7 @@ function tripStatusLabel(status: string, paymentStatus: string) {
   }
   switch (status) {
     case "pending":
-      return "Waiting for hub confirm";
+      return "Waiting for hub approval";
     case "confirmed":
     case "awaiting_pickup":
       return "Ready to collect";
@@ -55,26 +55,55 @@ function tripStatusLabel(status: string, paymentStatus: string) {
   }
 }
 
+function isPendingManage(b: Booking) {
+  if (b.status === "cancelled" || b.status === "completed") return false;
+  if (b.status === "pending") return true;
+  if (
+    b.paymentStatus === "pending" &&
+    !["active", "overdue"].includes(b.status)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isLiveRide(b: Booking) {
+  return b.status === "active" || b.status === "overdue";
+}
+
+function isReadyCollect(b: Booking) {
+  return (
+    (b.status === "confirmed" || b.status === "awaiting_pickup") &&
+    b.paymentStatus === "paid"
+  );
+}
+
 const PAST_STATUSES = ["completed", "cancelled"] as const;
 
 function HistoryInner() {
   const bookings = useAppStore((s) => s.bookings);
   const vehicles = useAppStore((s) => s.vehicles);
   const sites = useAppStore((s) => s.sites);
+  const cancelBooking = useAppStore((s) => s.cancelBooking);
+  const setToast = useAppStore((s) => s.setToast);
   const [showPast, setShowPast] = useState(false);
 
-  const { ongoing, past } = useMemo(() => {
+  const { pending, ready, live, past } = useMemo(() => {
     const byNewest = [...bookings].sort(
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
+    const pastList = byNewest.filter((b) =>
+      PAST_STATUSES.includes(b.status as (typeof PAST_STATUSES)[number]),
+    );
+    const open = byNewest.filter(
+      (b) => !PAST_STATUSES.includes(b.status as (typeof PAST_STATUSES)[number]),
+    );
     return {
-      ongoing: byNewest.filter(
-        (b) => !PAST_STATUSES.includes(b.status as (typeof PAST_STATUSES)[number]),
-      ),
-      past: byNewest.filter((b) =>
-        PAST_STATUSES.includes(b.status as (typeof PAST_STATUSES)[number]),
-      ),
+      pending: open.filter(isPendingManage),
+      ready: open.filter((b) => isReadyCollect(b) && !isPendingManage(b)),
+      live: open.filter(isLiveRide),
+      past: pastList,
     };
   }, [bookings]);
 
@@ -83,10 +112,35 @@ function HistoryInner() {
   const hubName = (b: Booking) =>
     sites.find((s) => s.id === b.siteId)?.name ?? null;
 
+  function handleCancel(b: Booking) {
+    const canCancel =
+      b.paymentStatus !== "paid" || b.status === "pending";
+    if (!canCancel) {
+      setToast("This booking can no longer be cancelled here");
+      return;
+    }
+    if (
+      !window.confirm(
+        b.status === "pending" && b.paymentStatus === "paid"
+          ? `Cancel ${b.code}? The hub has not approved it yet.`
+          : `Cancel unpaid booking ${b.code}?`,
+      )
+    ) {
+      return;
+    }
+    cancelBooking(b.id);
+  }
+
+  const empty =
+    pending.length === 0 &&
+    ready.length === 0 &&
+    live.length === 0 &&
+    past.length === 0;
+
   return (
     <div className="content-pad">
       <Header title="Your trips" />
-      {bookings.length === 0 ? (
+      {empty ? (
         <div className="px-6 py-12 text-center">
           <p className="text-sm" style={{ color: "var(--text2)" }}>
             No trips yet. Book a vehicle from Home.
@@ -101,24 +155,63 @@ function HistoryInner() {
         </div>
       ) : (
         <>
-          <p className="section-label">Ongoing</p>
-          {ongoing.length === 0 ? (
+          {pending.length > 0 ? (
+            <>
+              <p className="section-label">Pending</p>
+              <p
+                className="mx-4 -mt-1 mb-2 text-xs"
+                style={{ color: "var(--text2)" }}
+              >
+                Not on a ride yet — pay, wait for hub approval, or cancel.
+              </p>
+              {pending.map((b) => (
+                <TripCard
+                  key={b.id}
+                  booking={b}
+                  name={vehicleName(b)}
+                  hub={hubName(b)}
+                  onCancel={() => handleCancel(b)}
+                />
+              ))}
+            </>
+          ) : null}
+
+          {live.length > 0 ? (
+            <>
+              <p className="section-label">On ride</p>
+              {live.map((b) => (
+                <TripCard
+                  key={b.id}
+                  booking={b}
+                  name={vehicleName(b)}
+                  hub={hubName(b)}
+                />
+              ))}
+            </>
+          ) : null}
+
+          {ready.length > 0 ? (
+            <>
+              <p className="section-label">Ready to collect</p>
+              {ready.map((b) => (
+                <TripCard
+                  key={b.id}
+                  booking={b}
+                  name={vehicleName(b)}
+                  hub={hubName(b)}
+                />
+              ))}
+            </>
+          ) : null}
+
+          {pending.length === 0 && live.length === 0 && ready.length === 0 ? (
             <p
               className="mx-4 mb-2.5 rounded-2xl p-4 text-sm"
               style={{ background: "var(--card)", color: "var(--text2)" }}
             >
-              No ongoing trip. Book a bike from Home.
+              No open trips. Book a bike from Home.
             </p>
-          ) : (
-            ongoing.map((b) => (
-              <TripCard
-                key={b.id}
-                booking={b}
-                name={vehicleName(b)}
-                hub={hubName(b)}
-              />
-            ))
-          )}
+          ) : null}
 
           {past.length > 0 ? (
             <>
@@ -162,10 +255,12 @@ function TripCard({
   booking: b,
   name,
   hub,
+  onCancel,
 }: {
   booking: Booking;
   name: string;
   hub: string | null;
+  onCancel?: () => void;
 }) {
   const href = tripHref(b.status, b.paymentStatus, b.id);
   const label = tripStatusLabel(b.status, b.paymentStatus);
@@ -178,7 +273,15 @@ function TripCard({
         minute: "2-digit",
       })
     : null;
-  const inner = (
+  const needsPay =
+    b.paymentStatus === "pending" &&
+    !["active", "completed", "cancelled", "overdue"].includes(b.status);
+  const waitingApproval = b.status === "pending" && b.paymentStatus === "paid";
+  const canCancel =
+    Boolean(onCancel) &&
+    (needsPay || waitingApproval);
+
+  const details = (
     <>
       <div className="flex justify-between gap-3">
         <div className="font-bold">{name}</div>
@@ -190,8 +293,7 @@ function TripCard({
                 ? "var(--danger)"
                 : b.status === "cancelled"
                   ? "var(--text2)"
-                  : b.paymentStatus === "pending" &&
-                      !["active", "completed"].includes(b.status)
+                  : needsPay || waitingApproval
                     ? "var(--warn)"
                     : "var(--primary)",
           }}
@@ -210,6 +312,17 @@ function TripCard({
           </>
         ) : null}
       </div>
+      {waitingApproval ? (
+        <p className="mt-2 text-xs" style={{ color: "var(--text2)" }}>
+          Paid — waiting for the hub to accept. You can cancel until they
+          confirm.
+        </p>
+      ) : null}
+      {needsPay ? (
+        <p className="mt-2 text-xs" style={{ color: "var(--text2)" }}>
+          Finish payment to send this request to the hub.
+        </p>
+      ) : null}
       {b.status === "cancelled" ? (
         <div className="mt-2 flex items-center justify-between gap-3">
           <p className="text-xs" style={{ color: "var(--text2)" }}>
@@ -224,25 +337,79 @@ function TripCard({
           </Link>
         </div>
       ) : null}
+      {canCancel || needsPay || waitingApproval ? (
+        <div className="mt-3 flex gap-2">
+          {needsPay ? (
+            <Link
+              href={href}
+              className="flex-1 rounded-xl py-2.5 text-center text-xs font-bold text-white"
+              style={{ background: "var(--primary)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              Pay now
+            </Link>
+          ) : waitingApproval ? (
+            <Link
+              href={href}
+              className="flex-1 rounded-xl py-2.5 text-center text-xs font-bold text-white"
+              style={{ background: "var(--primary)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              View status
+            </Link>
+          ) : null}
+          {canCancel ? (
+            <button
+              type="button"
+              className="flex-1 rounded-xl border py-2.5 text-xs font-bold"
+              style={{
+                borderColor: "var(--border)",
+                color: "var(--danger)",
+                background: "var(--card)",
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onCancel?.();
+              }}
+            >
+              Cancel
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
+
   if (b.status === "cancelled") {
     return (
       <div
         className="mx-4 mb-2.5 rounded-2xl p-4"
         style={{ background: "var(--card)" }}
       >
-        {inner}
+        {details}
       </div>
     );
   }
+
+  if (canCancel || needsPay || waitingApproval) {
+    return (
+      <div
+        className="mx-4 mb-2.5 rounded-2xl p-4"
+        style={{ background: "var(--card)" }}
+      >
+        {details}
+      </div>
+    );
+  }
+
   return (
     <Link
       href={href}
       className="mx-4 mb-2.5 block rounded-2xl p-4"
       style={{ background: "var(--card)" }}
     >
-      {inner}
+      {details}
     </Link>
   );
 }

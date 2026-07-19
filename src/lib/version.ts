@@ -1,14 +1,70 @@
-export const APP_VERSION = "0.5.1";
+export const APP_VERSION = "0.6.2";
 
 export interface ChangelogEntry {
   version: string;
   date: string;
   title: string;
   highlights: string[];
+  /** Optional longer note shown when the release is expanded (Latest first). */
+  details?: string;
 }
 
 /** Newest first — shown in What's New for riders and operators. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "0.6.2",
+    date: "2026-07-20",
+    title: "Digital key, multi-hub return, desk polish",
+    details:
+      "Riders choose digital vs physical key when the model allows. Digital unlock can auto-issue on Terima or wait for Kirim kunci digital. Return at any of the operator’s hubs within 200 m. Desk confirms are Bahasa; help hub under Lainnya.",
+    highlights: [
+      "Expandable What's New — tap a version for details",
+      "Digital key: rider choice; auto or manual issue from Orders",
+      "Active ride: motor on/off + ping phone location (honest demo)",
+      "Return at a chosen hub within 200 m; map list of return points",
+      "Operator: Bahasa confirms, shift FAQ; weekend +15% on extend",
+    ],
+  },
+  {
+    version: "0.6.1",
+    date: "2026-07-19",
+    title: "Casan Wallet + tourist & desk onboarding",
+    highlights: [
+      "Demo Casan Wallet: balance, top-up, pay at checkout, redeem CASAN25 once",
+      "Pay at hub for any pickup (cash-friendly for visitors); clearer SIM/IDP copy",
+      "Login tips for tourists & new hires; first-shift operator desk guide",
+    ],
+  },
+  {
+    version: "0.6.0",
+    date: "2026-07-19",
+    title: "Operator desk depth (no fake IoT)",
+    highlights: [
+      "Fleet unit maintenance log (notes only — not remote lock or ping)",
+      "Pending request detail: appointment, stock, WhatsApp; rider trust badges",
+      "Clearer operating-hours editor; earnings CSV export for the filtered period",
+    ],
+  },
+  {
+    version: "0.5.3",
+    date: "2026-07-19",
+    title: "Rider UX: open hours, filters, terms",
+    highlights: [
+      "Open now / Closed on hubs; area chips and key-mode filters on Home",
+      "Payment requires rental terms; confirmed screen shows hub rating + schedule",
+      "Active ride stays primary with a secondary ready-to-collect link; honest Est. range",
+    ],
+  },
+  {
+    version: "0.5.2",
+    date: "2026-07-19",
+    title: "Honesty: weekend price, overtime, demo labels",
+    highlights: [
+      "Weekend +15% applies on Sat/Sun when the operator toggle is on",
+      "Overtime copy says billing coming soon (not charged yet)",
+      "Weather and referral marked demo — no live data or wallet credit promise",
+    ],
+  },
   {
     version: "0.5.1",
     date: "2026-07-17",

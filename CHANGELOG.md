@@ -3,6 +3,24 @@
 All notable user-facing changes to Casan Rent are listed here.
 The same history appears in-app at **What's New** (`/updates`).
 
+## [0.6.2] — 2026-07-20
+
+### Rider
+- **Digital vs physical key** choice when the model allows both (clear consequences)
+- Booking persists **Wallet** or **Pay at hub** (not hardcoded QRIS)
+- Active ride: **Ping location** (phone GPS demo) + motor on/off for digital keys
+- **Multi-hub return**: pick any of the operator’s hubs; complete within **200 m**
+- Confirmed screen shows **Return here** + digital-key ready/waiting
+- Expandable **What's New** (tap a version for details)
+
+### Operator
+- **Kirim kunci digital** — auto on Terima or manual from Orders
+- Bahasa confirms for Terima semua / key return
+- **Bantuan shift** FAQ under Lainnya (`/operator/help`)
+
+### Honesty / pricing
+- Weekend **+15%** also applies on rental **extend** when the operator toggle is on
+
 ## [0.4.7] — 2026-07-16
 
 ### Rider

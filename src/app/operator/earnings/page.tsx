@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronUp,
   CircleAlert,
+  Download,
   MapPin,
   PiggyBank,
   Receipt,
@@ -259,6 +260,53 @@ function EarningsInner() {
 
   const awaitingTotal = awaitingCash.reduce((s, b) => s + bookingGross(b), 0);
 
+  function exportCsv() {
+    const header = [
+      "code",
+      "createdAt",
+      "rider",
+      "site",
+      "status",
+      "paymentMethod",
+      "rentalIdr",
+      "addonsIdr",
+      "extensionsIdr",
+      "grossIdr",
+      "feeIdr",
+      "netIdr",
+    ];
+    const rows = mine.map((b) => {
+      const site = sites.find((s) => s.id === b.siteId);
+      const gross = bookingGross(b);
+      const fee = Math.round(gross * (feePct / 100));
+      const ext = (b.extensions ?? []).reduce((s, e) => s + e.priceIdr, 0);
+      return [
+        b.code,
+        b.createdAt,
+        b.riderName,
+        site?.name ?? "",
+        b.status,
+        b.paymentMethod,
+        String(b.rentalPriceIdr),
+        String(b.addonsPriceIdr ?? 0),
+        String(ext),
+        String(gross),
+        String(fee),
+        String(gross - fee),
+      ]
+        .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+        .join(",");
+    });
+    const csv = [header.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `casan-earnings-${period}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="content-pad pb-4">
       <div
@@ -267,9 +315,21 @@ function EarningsInner() {
           background: "linear-gradient(135deg, #0f766e, var(--primary))",
         }}
       >
-        <div className="flex items-center gap-2 text-xs font-semibold text-white/85">
-          <PiggyBank size={16} />
-          Uang kamu · {periodId}
+        <div className="flex items-center justify-between gap-2 text-xs font-semibold text-white/85">
+          <span className="inline-flex items-center gap-2">
+            <PiggyBank size={16} />
+            Uang kamu · {periodId}
+          </span>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold"
+            style={{ background: "rgba(255,255,255,0.2)" }}
+            onClick={exportCsv}
+            disabled={mine.length === 0}
+          >
+            <Download size={12} />
+            CSV
+          </button>
         </div>
         <div className="font-display mt-2 text-4xl font-semibold tracking-tight">
           {formatIdr(stats.net)}

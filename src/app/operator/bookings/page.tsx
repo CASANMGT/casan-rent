@@ -36,11 +36,16 @@ import {
   getCurrentStaff,
 } from "@/lib/permissions";
 import { PendingAge } from "@/components/UxSignals";
+import { riderTrustStats } from "@/lib/catalog";
 
 type Tab = "new" | "active" | "done";
 
 function needsPhysicalKey(keys: string | undefined) {
   return keys === "physical" || keys === "both";
+}
+
+function needsDigitalKey(keys: string | undefined) {
+  return keys === "digital" || keys === "both";
 }
 
 export default function OperatorBookingsPage() {
@@ -65,6 +70,8 @@ function BookingsInner() {
   const collectPhysicalKey = useAppStore((s) => s.collectPhysicalKey);
   const completeReturn = useAppStore((s) => s.completeReturn);
   const payBooking = useAppStore((s) => s.payBooking);
+  const issueDigitalKey = useAppStore((s) => s.issueDigitalKey);
+  const setDigitalKeyIssueMode = useAppStore((s) => s.setDigitalKeyIssueMode);
   const simulateRiderRequest = useAppStore((s) => s.simulateRiderRequest);
   const setToast = useAppStore((s) => s.setToast);
   const staff = useAppStore((s) => s.staff);
@@ -255,7 +262,7 @@ function BookingsInner() {
               .map((b) => b.id);
             if (
               !window.confirm(
-                `Accept all ${pendingIds.length} new requests? Review appointment and availability first.`,
+                `Terima semua ${pendingIds.length} permintaan baru? Cek janji temu dan stok dulu.`,
               )
             ) {
               return;
@@ -300,6 +307,7 @@ function BookingsInner() {
               x.status === "available",
           ).length;
           const phys = needsPhysicalKey(b.keysAccess);
+          const needsDigital = needsDigitalKey(b.keysAccess);
           const returnDue = returnDueSummary(b.endsAt, b.durationMinutes);
           const expectedReturn = formatReturnBy(b.endsAt, b.durationMinutes);
           const plannedFinish =
@@ -331,6 +339,7 @@ function BookingsInner() {
                     : b.status === "completed"
                       ? "Selesai"
                       : "Dibatalkan";
+          const trust = riderTrustStats(bookings, b);
 
           return (
             <div
@@ -355,7 +364,32 @@ function BookingsInner() {
                   <PendingAge createdAt={b.createdAt} />
                 ) : null}
               </div>
-              <div className="mt-1 text-base font-bold">{b.riderName}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <div className="text-base font-bold">{b.riderName}</div>
+                <span
+                  className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                  style={{
+                    background:
+                      trust.label === "Trusted"
+                        ? "var(--success-soft)"
+                        : trust.label === "Returning"
+                          ? "var(--info-soft)"
+                          : "var(--neutral-soft)",
+                    color:
+                      trust.label === "Trusted"
+                        ? "var(--ok)"
+                        : trust.label === "Returning"
+                          ? "var(--digital)"
+                          : "var(--neutral)",
+                  }}
+                >
+                  {trust.label}
+                  {trust.completedTrips > 0
+                    ? ` · ${trust.completedTrips}`
+                    : ""}
+                  {trust.avgRating != null ? ` · ★${trust.avgRating}` : ""}
+                </span>
+              </div>
               {b.riderPhone ? (
                 <a
                   className="text-sm font-semibold"
@@ -631,6 +665,82 @@ function BookingsInner() {
                 </div>
               ) : null}
 
+              {needsDigital &&
+              (b.status === "pending" ||
+                b.status === "confirmed" ||
+                b.status === "awaiting_pickup") &&
+              !b.digitalKeyIssuedAt ? (
+                <div className="mt-3">
+                  <div
+                    className="mb-1.5 text-[10px] font-semibold uppercase"
+                    style={{ color: "var(--text2)" }}
+                  >
+                    Kunci digital
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {(
+                      [
+                        ["auto", "Otomatis"],
+                        ["manual", "Manual"],
+                      ] as const
+                    ).map(([mode, label]) => {
+                      const selected =
+                        (b.digitalKeyIssueMode ?? "auto") === mode;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          className="rounded-xl border-2 py-2 text-xs font-bold"
+                          style={{
+                            borderColor: selected
+                              ? "var(--primary)"
+                              : "var(--border)",
+                            background: selected
+                              ? "color-mix(in srgb, var(--primary) 8%, white)"
+                              : "var(--bg)",
+                            color: selected
+                              ? "var(--primary)"
+                              : "var(--text2)",
+                          }}
+                          onClick={() =>
+                            setDigitalKeyIssueMode(b.id, mode)
+                          }
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {needsDigital &&
+              b.digitalKeyIssuedAt &&
+              ["pending", "confirmed", "awaiting_pickup"].includes(b.status) ? (
+                <p
+                  className="mt-3 text-center text-xs font-semibold"
+                  style={{ color: "var(--ok)" }}
+                >
+                  Kunci digital sudah dikirim
+                </p>
+              ) : null}
+
+              {needsDigital &&
+              (b.status === "confirmed" || b.status === "awaiting_pickup") &&
+              !b.digitalKeyIssuedAt ? (
+                <button
+                  type="button"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-base font-bold text-white"
+                  style={{ background: "var(--digital)" }}
+                  onClick={() => {
+                    issueDigitalKey(b.id);
+                  }}
+                >
+                  <KeyRound size={20} />
+                  Kirim kunci digital
+                </button>
+              ) : null}
+
               {b.paymentMethod === "pay_at_operator" &&
               b.paymentStatus === "pending" &&
               b.status !== "pending" &&
@@ -683,7 +793,7 @@ function BookingsInner() {
                     onClick={() => {
                       if (
                         !window.confirm(
-                          "Confirm the key and bike are both back, then close this rental?",
+                          "Konfirmasi kunci dan sepeda sudah kembali, lalu tutup sewa ini?",
                         )
                       ) {
                         return;
@@ -704,7 +814,7 @@ function BookingsInner() {
                     onClick={() => {
                       if (
                         !window.confirm(
-                          "Confirm only the key is back. The rental and timer will continue.",
+                          "Konfirmasi hanya kunci yang kembali. Sewa dan timer tetap jalan.",
                         )
                       ) {
                         return;

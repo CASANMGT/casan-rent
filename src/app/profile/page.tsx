@@ -7,7 +7,7 @@ import { Header } from "@/components/Header";
 import { AuthGate } from "@/components/AuthGate";
 import { useAppStore } from "@/lib/store";
 import { APP_VERSION, hasUnseenUpdates } from "@/lib/version";
-import { osmBrowseUrl } from "@/lib/format";
+import { osmBrowseUrl, formatIdr } from "@/lib/format";
 import { IS_DEMO } from "@/lib/demo";
 
 export default function ProfilePage() {
@@ -28,6 +28,9 @@ function ProfileInner() {
   const setToast = useAppStore((s) => s.setToast);
   const lastSeenVersion = useAppStore((s) => s.lastSeenVersion);
   const showRiderGuide = useAppStore((s) => s.showRiderGuide);
+  const walletBalanceIdr = useAppStore((s) => s.walletBalanceIdr);
+  const redeemReferralCode = useAppStore((s) => s.redeemReferralCode);
+  const referralRedeemed = useAppStore((s) => s.referralRedeemed);
   const unseen = hasUnseenUpdates(lastSeenVersion);
 
   return (
@@ -40,11 +43,45 @@ function ProfileInner() {
         <div className="mt-1 text-sm" style={{ color: "var(--text2)" }}>
           {user.phone || (user.isGuest ? "Guest session" : "Rider account")}
         </div>
+        <Link
+          href="/wallet"
+          className="mt-3 flex items-center justify-between rounded-xl px-3 py-2.5 text-sm"
+          style={{ background: "var(--bg-deep)" }}
+        >
+          <span>
+            Casan Wallet
+            <span className="ml-1 text-xs" style={{ color: "var(--text2)" }}>
+              · Demo
+            </span>
+          </span>
+          <strong style={{ color: "var(--primary)" }}>
+            {formatIdr(walletBalanceIdr)} ›
+          </strong>
+        </Link>
         <div
           className="mt-3 rounded-xl px-3 py-2 text-sm"
           style={{ background: "var(--bg-deep)" }}
         >
-          Referral: <strong>CASAN25</strong> · Rp 25K credit (demo)
+          <div className="flex items-center justify-between gap-2">
+            <span>
+              Referral: <strong>CASAN25</strong>
+            </span>
+            <button
+              type="button"
+              className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold"
+              style={{ background: "var(--primary)", color: "white" }}
+              disabled={referralRedeemed}
+              onClick={() => {
+                const err = redeemReferralCode("CASAN25");
+                if (err) setToast(err);
+              }}
+            >
+              {referralRedeemed ? "Redeemed" : "Redeem"}
+            </button>
+          </div>
+          <div className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
+            Demo credit goes to Casan Wallet (Rp 25.000 once)
+          </div>
         </div>
       </div>
 

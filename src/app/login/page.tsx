@@ -156,9 +156,26 @@ export default function LoginPage() {
           <button type="button" className="btn-text" onClick={continueGuest}>
             Continue as Guest
           </button>
+          <p
+            className="mx-4 mt-3 rounded-xl px-3 py-2.5 text-xs leading-relaxed"
+            style={{ background: "var(--bg-deep)", color: "var(--text2)" }}
+          >
+            <strong style={{ color: "var(--text)" }}>Visiting Indonesia?</strong>{" "}
+            Guest works fine. At checkout use <strong>Casan Wallet</strong> (demo)
+            or <strong>Pay at hub</strong> with cash — you do not need DANA/OVO.
+          </p>
         </div>
       ) : (
         <div className="mt-6">
+          <p
+            className="mx-4 mb-3 rounded-xl px-3 py-2.5 text-xs leading-relaxed"
+            style={{ background: "var(--bg-deep)", color: "var(--text2)" }}
+          >
+            <strong style={{ color: "var(--text)" }}>New desk hire?</strong>{" "}
+            Use the account your admin gave you (demo:{" "}
+            <code>margonda.admin</code> / <code>casan2026</code>). After login,
+            follow the 3-step desk guide: Terima → Give key → Fleet.
+          </p>
           <label className="mx-4 mb-1.5 block text-xs font-bold uppercase tracking-wide" style={{ color: "var(--text2)" }}>
             Username
           </label>

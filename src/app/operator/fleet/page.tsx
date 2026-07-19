@@ -57,6 +57,8 @@ function FleetInner() {
   const bookings = useAppStore((s) => s.bookings);
   const pricing = useAppStore((s) => s.pricing);
   const updateVehicleStatus = useAppStore((s) => s.updateVehicleStatus);
+  const addMaintenanceEntry = useAppStore((s) => s.addMaintenanceEntry);
+  const maintenanceLog = useAppStore((s) => s.maintenanceLog);
   const addVehicle = useAppStore((s) => s.addVehicle);
   const addSite = useAppStore((s) => s.addSite);
   const updateSite = useAppStore((s) => s.updateSite);
@@ -952,10 +954,60 @@ function FleetInner() {
             Koordinat menentukan jarak pencarian dan geofence pengembalian.
             Periksa titik di OpenStreetMap sebelum menyimpan.
           </p>
+          <div
+            className="rounded-xl border px-3 py-3"
+            style={{ borderColor: "var(--border)", background: "var(--bg-deep)" }}
+          >
+            <div className="text-xs font-bold" style={{ color: "var(--text2)" }}>
+              Jam operasional
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="text-[11px]" style={{ color: "var(--text2)" }}>
+                Buka
+                <input
+                  type="time"
+                  className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+                  style={{ borderColor: "var(--border)", background: "var(--card)" }}
+                  value={(() => {
+                    const m = siteHours.match(/^(\d{1,2}:\d{2})/);
+                    return m ? m[1].padStart(5, "0") : "07:00";
+                  })()}
+                  onChange={(e) => {
+                    const open = e.target.value || "07:00";
+                    const close =
+                      siteHours.match(/[-–—]\s*(\d{1,2}:\d{2})/)?.[1] ?? "20:00";
+                    setSiteHours(`${open} - ${close}`);
+                  }}
+                />
+              </label>
+              <label className="text-[11px]" style={{ color: "var(--text2)" }}>
+                Tutup
+                <input
+                  type="time"
+                  className="mt-1 w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
+                  style={{ borderColor: "var(--border)", background: "var(--card)" }}
+                  value={(() => {
+                    const m = siteHours.match(/[-–—]\s*(\d{1,2}:\d{2})/);
+                    return m ? m[1].padStart(5, "0") : "20:00";
+                  })()}
+                  onChange={(e) => {
+                    const close = e.target.value || "20:00";
+                    const open =
+                      siteHours.match(/^(\d{1,2}:\d{2})/)?.[1] ?? "07:00";
+                    setSiteHours(`${open} - ${close}`);
+                  }}
+                />
+              </label>
+            </div>
+            <p className="mt-2 text-[11px]" style={{ color: "var(--text2)" }}>
+              Ditampilkan ke rider sebagai Open now / Closed. Saat ini:{" "}
+              <strong style={{ color: "var(--text)" }}>{siteHours || "—"}</strong>
+            </p>
+          </div>
           <input
             className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none"
             style={{ borderColor: "var(--border)" }}
-            placeholder="Jam buka (contoh: 07:00 - 20:00)"
+            placeholder="Jam buka (teks, contoh: 07:00 - 20:00)"
             value={siteHours}
             onChange={(e) => setSiteHours(e.target.value)}
           />
@@ -1339,6 +1391,15 @@ function FleetInner() {
                 : opSites.find((s) => s.id === siteFilter) ?? null
             }
             moveSites={opSites}
+            maintenanceLog={maintenanceLog}
+            onAddMaintenance={(id, note) => {
+              const err = addMaintenanceEntry(id, note);
+              if (err) {
+                setToast(err);
+                return;
+              }
+              setToast("Catatan perawatan disimpan");
+            }}
             onStatus={(id, status) => {
               if (
                 (status === "available" || status === "disabled") &&

@@ -11,7 +11,9 @@ import {
   formatOrderDateTime,
   keysAccessLabel,
   osmBrowseUrl,
+  RETURN_GEOFENCE_M,
 } from "@/lib/format";
+import { operatorRatingStats } from "@/lib/catalog";
 import { IS_DEMO } from "@/lib/demo";
 import { CollectWindow } from "@/components/UxSignals";
 
@@ -30,13 +32,18 @@ function BookingConfirmedInner() {
   const vehicles = useAppStore((s) => s.vehicles);
   const operators = useAppStore((s) => s.operators);
   const sites = useAppStore((s) => s.sites);
+  const reviews = useAppStore((s) => s.reviews);
   const confirmBooking = useAppStore((s) => s.confirmBooking);
+  const cancelBooking = useAppStore((s) => s.cancelBooking);
   const setToast = useAppStore((s) => s.setToast);
 
   const booking = bookings.find((b) => b.id === id);
   const vehicle = vehicles.find((v) => v.id === booking?.vehicleId);
   const op = operators.find((o) => o.id === booking?.operatorId);
   const site = sites.find((s) => s.id === booking?.siteId);
+  const hubRating = op
+    ? operatorRatingStats(op.id, bookings, reviews)
+    : { avg: 0, count: 0 };
   const prevStatus = useRef(booking?.status);
   const [simulating, setSimulating] = useState(false);
 
@@ -60,6 +67,7 @@ function BookingConfirmedInner() {
   const keys = booking.keysAccess ?? "digital";
   const needsShop =
     keys === "physical" || keys === "both" || booking.pickupType === "front_desk";
+  const needsDigital = keys === "digital" || keys === "both";
   const payAtCounter =
     booking.paymentMethod === "pay_at_operator" &&
     booking.paymentStatus === "pending";
@@ -71,6 +79,8 @@ function BookingConfirmedInner() {
   const shopLng = site?.lng ?? op.lng;
   const shopLabel =
     site?.shopPickupLabel || op.shopPickupLabel || site?.name || op.name;
+  const returnHubs = sites.filter((s) => s.operatorId === booking.operatorId);
+  const selectedReturnId = booking.returnSiteId || booking.siteId;
 
   function simulateConfirm() {
     setSimulating(true);
@@ -109,8 +119,12 @@ function BookingConfirmedInner() {
           <br />
           {booking.durationLabel} · {op.name}
           {site ? ` · ${site.name}` : ""}
-          <br />
-          Pickup appointment: {formatOrderDateTime(booking.appointmentAt)}
+          {hubRating.count > 0 ? (
+            <>
+              <br />
+              Hub ★ {hubRating.avg} ({hubRating.count} reviews)
+            </>
+          ) : null}
           <br />
           Keys: {keysAccessLabel(keys)}
           <br />
@@ -126,6 +140,15 @@ function BookingConfirmedInner() {
               : "payment pending"}
           <br />
           via {booking.paymentMethod.replace(/_/g, " ")}
+        </div>
+        <div
+          className="mx-auto mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold"
+          style={{
+            background: "color-mix(in srgb, var(--warn) 14%, white)",
+            color: "var(--text-warn)",
+          }}
+        >
+          Schedule · {formatOrderDateTime(booking.appointmentAt)}
         </div>
       </div>
 
@@ -290,6 +313,87 @@ function BookingConfirmedInner() {
           : "Open self-collect pin on OpenStreetMap"}
       </a>
 
+      {returnHubs.length > 0 ? (
+        <div className="card">
+          <div className="font-bold">Return here</div>
+          <p className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
+            Return within {RETURN_GEOFENCE_M} m of your chosen hub · phone GPS
+          </p>
+          <ul className="mt-3 space-y-2">
+            {returnHubs.map((hub) => {
+              const selected = hub.id === selectedReturnId;
+              return (
+                <li
+                  key={hub.id}
+                  className="rounded-xl border px-3 py-2.5 text-sm"
+                  style={{
+                    borderColor: selected ? "var(--primary)" : "var(--border)",
+                    background: selected
+                      ? "color-mix(in srgb, var(--primary) 8%, white)"
+                      : "var(--bg)",
+                  }}
+                >
+                  <div
+                    className="font-bold"
+                    style={{
+                      color: selected ? "var(--primary)" : "var(--text)",
+                    }}
+                  >
+                    {hub.name}
+                    {selected ? " · chosen" : ""}
+                  </div>
+                  <div className="text-xs" style={{ color: "var(--text2)" }}>
+                    {hub.area}
+                    {hub.city ? ` · ${hub.city}` : ""}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+
+      {needsDigital ? (
+        <div
+          className="mx-4 rounded-xl border p-4 text-sm"
+          style={{
+            borderColor: booking.digitalKeyIssuedAt
+              ? "var(--ok)"
+              : "var(--warn)",
+            background: booking.digitalKeyIssuedAt ? "#E8F8F5" : "#FEF5E7",
+          }}
+        >
+          {booking.digitalKeyIssuedAt ? (
+            <>
+              <div className="font-semibold">
+                Digital key ready — open Unlock
+              </div>
+              <p className="mt-1" style={{ color: "var(--text2)" }}>
+                Use the app to unlock when you arrive at the unit.
+              </p>
+            </>
+          ) : booking.digitalKeyIssueMode === "auto" && waitingConfirm ? (
+            <>
+              <div className="font-semibold">
+                Digital key pending (auto)
+              </div>
+              <p className="mt-1" style={{ color: "var(--text2)" }}>
+                Key issues automatically when the hub confirms your booking.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="font-semibold">
+                Waiting for staff to issue digital key
+              </div>
+              <p className="mt-1" style={{ color: "var(--text2)" }}>
+                Staff will send the unlock key from the operator app.
+              </p>
+            </>
+          )}
+        </div>
+      ) : null}
+
       <div className="card">
         <div className="mb-2 font-bold text-sm">Need help?</div>
         <ContactActions
@@ -298,6 +402,52 @@ function BookingConfirmedInner() {
           name={op.name}
           bookingCode={booking.code}
         />
+      </div>
+
+      <div className="card">
+        <div className="font-bold text-sm">Change appointment or duration?</div>
+        <p className="mt-1 text-xs" style={{ color: "var(--text2)" }}>
+          The app does not rewrite price silently. Contact the hub to modify a
+          paid booking, or cancel while unpaid and book again.
+        </p>
+        {booking.paymentStatus === "pending" &&
+        !["active", "overdue", "completed", "cancelled"].includes(
+          booking.status,
+        ) ? (
+          <button
+            type="button"
+            className="btn-secondary !mx-0 mt-3 !w-full"
+            onClick={() => {
+              if (
+                !window.confirm(
+                  "Cancel this unpaid booking? You can book again with a new time.",
+                )
+              ) {
+                return;
+              }
+              cancelBooking(booking.id);
+              setToast("Booking cancelled — book again to change schedule");
+              router.push(
+                booking.siteId
+                  ? `/models/${booking.modelId}?site=${booking.siteId}`
+                  : `/models/${booking.modelId}`,
+              );
+            }}
+          >
+            Cancel unpaid · rebook
+          </button>
+        ) : (
+          <a
+            className="btn-secondary !mx-0 mt-3 !w-full text-center"
+            href={`https://wa.me/${(site?.whatsapp || op.phone).replace(/\D/g, "")}?text=${encodeURIComponent(
+              `Hi, I'd like to change booking ${booking.code} (appointment/duration).`,
+            )}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            WhatsApp hub to modify
+          </a>
+        )}
       </div>
     </div>
   );
